@@ -1,0 +1,3 @@
+[submodule "3rdparty/linalg"]
+	path = 3rdparty/linalg
+	url = https://github.com/sgorsten/linalg.git
