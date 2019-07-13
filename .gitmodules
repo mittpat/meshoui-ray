@@ -1,3 +1,6 @@
 [submodule "3rdparty/linalg"]
 	path = 3rdparty/linalg
 	url = https://github.com/sgorsten/linalg.git
+[submodule "3rdparty/stb"]
+	path = 3rdparty/stb
+	url = https://github.com/nothings/stb.git

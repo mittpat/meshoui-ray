@@ -7,7 +7,7 @@ add_executable(meshouiray
     main.cpp)
 
 if(NOT MSVC)
-    target_link_libraries(meshouiray linalg stdc++fs)
+    target_link_libraries(meshouiray linalg stb stdc++fs)
 else()
-    target_link_libraries(meshouiray linalg)
+    target_link_libraries(meshouiray linalg stb)
 endif()
