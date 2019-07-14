@@ -1,5 +1,7 @@
 # meshouiray
 
+![sample viewer_output](https://raw.githubusercontent.com/mittpat/meshoui-ray/master/screenshot.png)
+
 Compiling
 -------
 * git submodule update --init --recursive

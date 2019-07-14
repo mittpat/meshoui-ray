@@ -1,85 +1,71 @@
-#include "assets.h"
-
-#include <experimental/filesystem>
+#pragma once
 
 #include <linalg.h>
 
-#include <functional>
+#include <vector>
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <stb_image_write.h>
-
-namespace std { namespace filesystem = experimental::filesystem; }
-using namespace linalg;
-using namespace linalg::aliases;
-
-int main(int, char**)
+class MoBBox
 {
-    MoNode root{"__root", identity, {}, {}};
+public:
+    MoBBox() {}
+    MoBBox(const linalg::aliases::float3& min, const linalg::aliases::float3& max);
+    MoBBox(const linalg::aliases::float3& point);
 
-    std::filesystem::path fileToLoad = "teapot.dae";
-    if (!fileToLoad.empty())
+    bool intersect(const linalg::aliases::float3& origin, const linalg::aliases::float3& oneOverDirection,
+                   float* t_near = nullptr, float* t_far = nullptr) const;
+    void expandToInclude(const linalg::aliases::float3& point);
+    void expandToInclude(const MoBBox& box);
+
+    linalg::aliases::float3 min;
+    linalg::aliases::float3 max;
+    linalg::aliases::float3 extent;
+};
+
+struct MoTriangle
+{
+    linalg::aliases::float3 v0, v1, v2;
+    MoBBox getBoundingBox() const
     {
-        MoLoad(fileToLoad, root.children);
-        fileToLoad = "";
+        MoBBox bb(v0);
+        bb.expandToInclude(v1);
+        bb.expandToInclude(v2);
+        return bb;
     }
-
-    int total = 0;
-
-    std::function<void(const MoNode &, const float4x4 &)> draw = [&](const MoNode & node, const float4x4 & model)
+    linalg::aliases::float3 getCentroid() const
     {
-        if (!node.mesh.triangles.empty())
-        {
-            //model
+        return (v0 + v1 + v2) / 3.0f;
+    }
+};
 
-            struct Sample
-            {
-                uint8_t r, g, b, a;
-            };
+struct MoIntersection
+{
+    const MoTriangle* object;
+    linalg::aliases::float3 point;
+    float distance;
+};
 
-            int2 resolution(256,256);
-            std::vector<Sample> output(resolution[0] * resolution[1]);
+class MoBVH
+{
+public:
+    MoBVH() {}
+    MoBVH(const std::vector<MoTriangle>& triangles, std::uint32_t leafSize = 4);
+    bool getIntersection(const linalg::aliases::float3& origin, const linalg::aliases::float3& direction,
+                         MoIntersection* intersection, bool anyHit = false) const;
 
-            double fov = 75.0 * 3.14159 / 360;
-            double scale = std::tan(fov * 0.5);
-            double imageAspectRatio = resolution[0] / double(resolution[1]);
-            float4x4 cameraWorldTransform = identity;
-            float3 eye(-10,0,0);// = cameraWorldTransform.w.xyz();
+    std::uint32_t nodeCount;
+    std::uint32_t leafCount;
+    std::uint32_t leafSize;
+    std::vector<MoTriangle> triangles;
 
-            for (std::uint32_t row = 0, height = resolution[1]; row < height; ++row)
-            {
-                for (std::uint32_t column = 0, width = resolution[0]; column < width; ++column)
-                {
-                    std::uint32_t index = row * resolution[0] + column;
-
-                    double x = (2 * (column + 0.5) / double(resolution[0]) - 1) * imageAspectRatio * scale;
-                    double y = (1 - 2 * (row + 0.5) / double(resolution[1])) * scale;
-                    float3 sampleDirection = mul(cameraWorldTransform, float4(1, x, y, 0)).xyz();
-                    sampleDirection = normalize(sampleDirection);
-
-                    MoIntersection intersectionInfo;
-                    if (node.mesh.bvh.getIntersection(eye, sampleDirection, &intersectionInfo, false))
-                    {
-                        output[index] = { 0,0,0,255 };
-                    }
-                    else
-                    {
-                        output[index] = { 255,255,255,255 };
-                    }
-                }
-            }
-
-            stbi_write_png((std::string("test") + std::to_string(total++) + ".png").c_str(), resolution[0], resolution[1], 4, output.data(), 4 * resolution[0]);
-        }
-        for (const MoNode & child : node.children)
-        {
-            draw(child, mul(model, child.model));
-        }
+    struct Split
+    {
+        MoBBox boundingBox;
+        std::uint32_t start;
+        std::uint32_t count;
+        std::uint32_t offset;
     };
-    draw(root, root.model);
-
-    return 0;
-}
+    std::vector<Split> nodes;
+};
 
 /*
 ------------------------------------------------------------------------------

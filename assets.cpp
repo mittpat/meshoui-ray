@@ -1,84 +1,74 @@
 #include "assets.h"
 
+#include <assimp/Importer.hpp>
+#include <assimp/postprocess.h>
+#include <assimp/scene.h>
+
 #include <experimental/filesystem>
-
-#include <linalg.h>
-
-#include <functional>
-
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <stb_image_write.h>
 
 namespace std { namespace filesystem = experimental::filesystem; }
 using namespace linalg;
 using namespace linalg::aliases;
 
-int main(int, char**)
+void parseNodes(const aiScene * scene, const std::vector<MoTriangleList> & meshes, aiNode * node, std::vector<MoNode> & nodes)
 {
-    MoNode root{"__root", identity, {}, {}};
-
-    std::filesystem::path fileToLoad = "teapot.dae";
-    if (!fileToLoad.empty())
+    nodes.push_back({node->mName.C_Str(), transpose(float4x4((float*)&node->mTransformation)), {}, {}});
+    for (std::uint32_t i = 0; i < node->mNumMeshes; ++i)
     {
-        MoLoad(fileToLoad, root.children);
-        fileToLoad = "";
+        nodes.back().children.push_back({scene->mMeshes[node->mMeshes[i]]->mName.C_Str(),
+                                         identity,
+                                         meshes[node->mMeshes[i]],
+                                         {}});
     }
 
-    int total = 0;
-
-    std::function<void(const MoNode &, const float4x4 &)> draw = [&](const MoNode & node, const float4x4 & model)
+    for (std::uint32_t i = 0; i < node->mNumChildren; ++i)
     {
-        if (!node.mesh.triangles.empty())
+        parseNodes(scene, meshes, node->mChildren[i], nodes.back().children);
+    }
+}
+
+void MoLoad(const std::string &filename, std::vector<MoNode> &nodes)
+{
+    if (!filename.empty() && std::filesystem::exists(filename))
+    {
+        Assimp::Importer importer;
+        const aiScene * scene = importer.ReadFile(filename, aiProcess_Debone | aiProcessPreset_TargetRealtime_Fast);
+
+        std::vector<MoTriangleList> meshes(scene->mNumMeshes);
+        for (std::uint32_t meshIdx = 0; meshIdx < scene->mNumMeshes; ++meshIdx)
         {
-            //model
+            std::vector<MoTriangle> &triangles = meshes[meshIdx].triangles;
 
-            struct Sample
+            const auto* mesh = scene->mMeshes[meshIdx];
+            for (std::uint32_t faceIdx = 0; faceIdx < mesh->mNumFaces; ++faceIdx)
             {
-                uint8_t r, g, b, a;
-            };
-
-            int2 resolution(256,256);
-            std::vector<Sample> output(resolution[0] * resolution[1]);
-
-            double fov = 75.0 * 3.14159 / 360;
-            double scale = std::tan(fov * 0.5);
-            double imageAspectRatio = resolution[0] / double(resolution[1]);
-            float4x4 cameraWorldTransform = identity;
-            float3 eye(-10,0,0);// = cameraWorldTransform.w.xyz();
-
-            for (std::uint32_t row = 0, height = resolution[1]; row < height; ++row)
-            {
-                for (std::uint32_t column = 0, width = resolution[0]; column < width; ++column)
+                const auto* face = &mesh->mFaces[faceIdx];
+                switch (face->mNumIndices)
                 {
-                    std::uint32_t index = row * resolution[0] + column;
-
-                    double x = (2 * (column + 0.5) / double(resolution[0]) - 1) * imageAspectRatio * scale;
-                    double y = (1 - 2 * (row + 0.5) / double(resolution[1])) * scale;
-                    float3 sampleDirection = mul(cameraWorldTransform, float4(1, x, y, 0)).xyz();
-                    sampleDirection = normalize(sampleDirection);
-
-                    MoIntersection intersectionInfo;
-                    if (node.mesh.bvh.getIntersection(eye, sampleDirection, &intersectionInfo, false))
-                    {
-                        output[index] = { 0,0,0,255 };
-                    }
-                    else
-                    {
-                        output[index] = { 255,255,255,255 };
-                    }
+                case 1:
+                    break;
+                case 2:
+                    break;
+                case 3:
+                {
+                    triangles.push_back({
+                         float3((float*)&mesh->mVertices[face->mIndices[0]]),
+                         float3((float*)&mesh->mVertices[face->mIndices[1]]),
+                         float3((float*)&mesh->mVertices[face->mIndices[2]])
+                                        });
+                    break;
+                }
+                default:
+                    break;
                 }
             }
 
-            stbi_write_png((std::string("test") + std::to_string(total++) + ".png").c_str(), resolution[0], resolution[1], 4, output.data(), 4 * resolution[0]);
+            meshes[meshIdx].bvh = MoBVH(triangles);
         }
-        for (const MoNode & child : node.children)
-        {
-            draw(child, mul(model, child.model));
-        }
-    };
-    draw(root, root.model);
 
-    return 0;
+        nodes.push_back({std::filesystem::canonical(filename).c_str(), identity, {}, {}});
+        parseNodes(scene, meshes, scene->mRootNode, nodes.back().children);
+    }
 }
 
 /*

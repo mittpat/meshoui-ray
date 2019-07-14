@@ -1,85 +1,24 @@
-#include "assets.h"
+#pragma once
 
-#include <experimental/filesystem>
+#include "intersect.h"
 
 #include <linalg.h>
 
-#include <functional>
+#include <vector>
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <stb_image_write.h>
+struct MoTriangleList {
+    std::vector<MoTriangle> triangles;
+    MoBVH bvh;
+};
 
-namespace std { namespace filesystem = experimental::filesystem; }
-using namespace linalg;
-using namespace linalg::aliases;
+struct MoNode {
+    std::string               name;
+    linalg::aliases::float4x4 model;
+    MoTriangleList            mesh;
+    std::vector<MoNode>       children;
+};
 
-int main(int, char**)
-{
-    MoNode root{"__root", identity, {}, {}};
-
-    std::filesystem::path fileToLoad = "teapot.dae";
-    if (!fileToLoad.empty())
-    {
-        MoLoad(fileToLoad, root.children);
-        fileToLoad = "";
-    }
-
-    int total = 0;
-
-    std::function<void(const MoNode &, const float4x4 &)> draw = [&](const MoNode & node, const float4x4 & model)
-    {
-        if (!node.mesh.triangles.empty())
-        {
-            //model
-
-            struct Sample
-            {
-                uint8_t r, g, b, a;
-            };
-
-            int2 resolution(256,256);
-            std::vector<Sample> output(resolution[0] * resolution[1]);
-
-            double fov = 75.0 * 3.14159 / 360;
-            double scale = std::tan(fov * 0.5);
-            double imageAspectRatio = resolution[0] / double(resolution[1]);
-            float4x4 cameraWorldTransform = identity;
-            float3 eye(-10,0,0);// = cameraWorldTransform.w.xyz();
-
-            for (std::uint32_t row = 0, height = resolution[1]; row < height; ++row)
-            {
-                for (std::uint32_t column = 0, width = resolution[0]; column < width; ++column)
-                {
-                    std::uint32_t index = row * resolution[0] + column;
-
-                    double x = (2 * (column + 0.5) / double(resolution[0]) - 1) * imageAspectRatio * scale;
-                    double y = (1 - 2 * (row + 0.5) / double(resolution[1])) * scale;
-                    float3 sampleDirection = mul(cameraWorldTransform, float4(1, x, y, 0)).xyz();
-                    sampleDirection = normalize(sampleDirection);
-
-                    MoIntersection intersectionInfo;
-                    if (node.mesh.bvh.getIntersection(eye, sampleDirection, &intersectionInfo, false))
-                    {
-                        output[index] = { 0,0,0,255 };
-                    }
-                    else
-                    {
-                        output[index] = { 255,255,255,255 };
-                    }
-                }
-            }
-
-            stbi_write_png((std::string("test") + std::to_string(total++) + ".png").c_str(), resolution[0], resolution[1], 4, output.data(), 4 * resolution[0]);
-        }
-        for (const MoNode & child : node.children)
-        {
-            draw(child, mul(model, child.model));
-        }
-    };
-    draw(root, root.model);
-
-    return 0;
-}
+void MoLoad(const std::string &filename, std::vector<MoNode> &nodes);
 
 /*
 ------------------------------------------------------------------------------
