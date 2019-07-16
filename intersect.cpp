@@ -131,11 +131,11 @@ bool MoBBox::intersect(const float3& origin, const float3& oneOverDirection, flo
 }
 
 // Adapted from Brandon Pelfrey's "A Simple, Optimized Bounding Volume Hierarchy for Ray/Object Intersection Testing"
-MoBVH::MoBVH(const std::vector<MoTriangle>& _triangles, std::uint32_t _leafSize)
+MoBVH::MoBVH(MoTriangle *pTriangles, uint32_t _triangleCount)
     : nodeCount(0)
     , leafCount(0)
-    , leafSize(_leafSize)
-    , triangles(_triangles)
+    , triangles(pTriangles)
+    , triangleCount(_triangleCount)
     , nodes()
 {
     std::uint32_t stackPtr = 0;
@@ -148,12 +148,12 @@ MoBVH::MoBVH(const std::vector<MoTriangle>& _triangles, std::uint32_t _leafSize)
     };
     std::vector<Entry> entries(1);
     entries[stackPtr].start = 0;
-    entries[stackPtr].end = triangles.size();
+    entries[stackPtr].end = triangleCount;
     entries[stackPtr].parent = Node_Root;
     stackPtr++;
 
     Split node;
-    nodes.reserve(triangles.size() * 2);
+    nodes.reserve(triangleCount * 2);
 
     while (stackPtr > 0)
     {
@@ -176,7 +176,8 @@ MoBVH::MoBVH(const std::vector<MoTriangle>& _triangles, std::uint32_t _leafSize)
         }
         node.boundingBox = boundingBox;
 
-        if (count <= leafSize)
+        // we're at the leaf
+        if (count <= 1)
         {
             node.offset = 0;
             leafCount++;

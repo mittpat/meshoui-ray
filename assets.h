@@ -6,19 +6,33 @@
 
 #include <vector>
 
-struct MoTriangleList {
-    std::vector<MoTriangle> triangles;
-    MoBVH bvh;
-};
+typedef struct MoTriangleList_T
+{
+    const MoTriangle* pTriangles;
+    uint32_t          triangleCount;
+    MoBVH             bvh;
+}* MoTriangleList;
 
-struct MoNode {
+typedef struct MoMeshList_T
+{
+    const MoTriangleList* pTriangleLists;
+    uint32_t              triangleListCount;
+}* MoMeshList;
+
+typedef struct MoNode_T* MoNode;
+typedef struct MoNode_T
+{
     std::string               name;
     linalg::aliases::float4x4 model;
     MoTriangleList            mesh;
-    std::vector<MoNode>       children;
-};
+    const MoNode*             pChildren;
+    uint32_t                  childCount;
+}* MoNode;
 
-void MoLoad(const std::string &filename, std::vector<MoNode> &nodes);
+bool MoLoadAsset(const std::string& filename, MoNode* pRootNode, MoMeshList* pMeshList);
+
+void MoDestroyNode(MoNode node);
+void MoUnloadAsset(MoNode rootNode, MoMeshList meshList);
 
 /*
 ------------------------------------------------------------------------------

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.10.0)
 project(meshoui VERSION 0.2.0)
 
+find_package(Threads)
+
 add_subdirectory(3rdparty)
 
 add_executable(meshouiray
@@ -9,7 +11,7 @@ add_executable(meshouiray
     intersect.h intersect.cpp)
 
 if(NOT MSVC)
-    target_link_libraries(meshouiray assimp linalg stb stdc++fs)
+    target_link_libraries(meshouiray assimp linalg stb stdc++fs Threads::Threads)
 else()
     target_link_libraries(meshouiray assimp linalg stb)
 endif()

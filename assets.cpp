@@ -6,69 +6,154 @@
 
 #include <experimental/filesystem>
 
+namespace
+{
+    std::uint32_t nextPowerOfTwo(std::uint32_t v)
+    {
+        v--;
+        v |= v >> 1;
+        v |= v >> 2;
+        v |= v >> 4;
+        v |= v >> 8;
+        v |= v >> 16;
+        v++;
+        return v;
+    }
+
+    template<typename T>
+    void carray_resize(const T** array, std::uint32_t* currentSize, std::uint32_t newSize)
+    {
+        T** local = const_cast<T**>(array);
+
+        std::uint32_t previous = nextPowerOfTwo(*currentSize);
+        std::uint32_t next = nextPowerOfTwo(newSize);
+        if (previous != next)
+        {
+            *local = reinterpret_cast<T*>(realloc(*local, next * sizeof(T)));
+        }
+        *currentSize = newSize;
+    }
+
+    template<typename T>
+    void carray_push_back(const T** array, std::uint32_t* size, T value)
+    {
+        T** local = const_cast<T**>(array);
+
+        std::uint32_t previous = nextPowerOfTwo(*size);
+        std::uint32_t next = nextPowerOfTwo(++(*size));
+        if (previous != next)
+        {
+            *local = reinterpret_cast<T*>(realloc(*local, next * sizeof(T)));
+        }
+        (*local)[*size-1] = value;
+    }
+
+    template<typename T>
+    void carray_free(T* array, std::uint32_t* size)
+    {
+        free(array);
+        *size = 0;
+    }
+}
+
 namespace std { namespace filesystem = experimental::filesystem; }
 using namespace linalg;
 using namespace linalg::aliases;
 
-void parseNodes(const aiScene * scene, const std::vector<MoTriangleList> & meshes, aiNode * node, std::vector<MoNode> & nodes)
+void parseNodes(const aiScene * ai_scene, aiNode * ai_node, MoNode node, MoMeshList meshes)
 {
-    nodes.push_back({node->mName.C_Str(), transpose(float4x4((float*)&node->mTransformation)), {}, {}});
-    for (std::uint32_t i = 0; i < node->mNumMeshes; ++i)
+    carray_resize(&node->pChildren, &node->childCount, ai_node->mNumMeshes + ai_node->mNumChildren);
+    for (std::uint32_t i = 0; i < ai_node->mNumMeshes; ++i)
     {
-        nodes.back().children.push_back({scene->mMeshes[node->mMeshes[i]]->mName.C_Str(),
-                                         identity,
-                                         meshes[node->mMeshes[i]],
-                                         {}});
+        MoNode child = const_cast<MoNode&>(node->pChildren[i]) = new MoNode_T();
+        *child = {};
+        child->name = ai_scene->mMeshes[ai_node->mMeshes[i]]->mName.C_Str();
+        child->model = identity;
+        child->mesh = meshes->pTriangleLists[ai_node->mMeshes[i]];
     }
-
-    for (std::uint32_t i = 0; i < node->mNumChildren; ++i)
+    for (std::uint32_t i = 0; i < ai_node->mNumChildren; ++i)
     {
-        parseNodes(scene, meshes, node->mChildren[i], nodes.back().children);
+        MoNode child = const_cast<MoNode&>(node->pChildren[ai_node->mNumMeshes + i]) = new MoNode_T();
+        *child = {};
+        child->name = ai_node->mChildren[i]->mName.C_Str();
+        child->model = transpose(float4x4((float*)&ai_node->mChildren[i]->mTransformation));
+        parseNodes(ai_scene, ai_node->mChildren[i], child, meshes);
     }
 }
 
-void MoLoad(const std::string &filename, std::vector<MoNode> &nodes)
+bool MoLoadAsset(const std::string& filename, MoNode* pRootNode, MoMeshList* pMeshList)
 {
     if (!filename.empty() && std::filesystem::exists(filename))
     {
         Assimp::Importer importer;
         const aiScene * scene = importer.ReadFile(filename, aiProcess_Debone | aiProcessPreset_TargetRealtime_Fast);
 
-        std::vector<MoTriangleList> meshes(scene->mNumMeshes);
+        MoMeshList meshList = *pMeshList = new MoMeshList_T();
+        *meshList = {};
+        carray_resize(&meshList->pTriangleLists, &meshList->triangleListCount, scene->mNumMeshes);
         for (std::uint32_t meshIdx = 0; meshIdx < scene->mNumMeshes; ++meshIdx)
         {
-            std::vector<MoTriangle> &triangles = meshes[meshIdx].triangles;
+            MoTriangleList triangleList = const_cast<MoTriangleList&>(meshList->pTriangleLists[meshIdx]) = new MoTriangleList_T();
+            *triangleList = {};
 
             const auto* mesh = scene->mMeshes[meshIdx];
+            carray_resize(&triangleList->pTriangles, &triangleList->triangleCount, mesh->mNumFaces);
             for (std::uint32_t faceIdx = 0; faceIdx < mesh->mNumFaces; ++faceIdx)
             {
                 const auto* face = &mesh->mFaces[faceIdx];
                 switch (face->mNumIndices)
                 {
-                case 1:
-                    break;
-                case 2:
-                    break;
                 case 3:
                 {
-                    triangles.push_back({
-                         float3((float*)&mesh->mVertices[face->mIndices[0]]),
-                         float3((float*)&mesh->mVertices[face->mIndices[1]]),
-                         float3((float*)&mesh->mVertices[face->mIndices[2]])
-                                        });
+                    const_cast<MoTriangle&>(triangleList->pTriangles[faceIdx]) =  {
+                        float3((float*)&mesh->mVertices[face->mIndices[0]]),
+                        float3((float*)&mesh->mVertices[face->mIndices[1]]),
+                        float3((float*)&mesh->mVertices[face->mIndices[2]])};
                     break;
                 }
                 default:
+                    printf("MoLoadAsset(): File %s, Mesh %s, Face %d has %d vertices.\n", filename.c_str(), mesh->mName.C_Str(), faceIdx, face->mNumIndices);
                     break;
                 }
             }
 
-            meshes[meshIdx].bvh = MoBVH(triangles);
+            triangleList->bvh = MoBVH(const_cast<MoTriangle*>(triangleList->pTriangles), triangleList->triangleCount);
         }
 
-        nodes.push_back({std::filesystem::canonical(filename).c_str(), identity, {}, {}});
-        parseNodes(scene, meshes, scene->mRootNode, nodes.back().children);
+        MoNode rootNode = *pRootNode = new MoNode_T();
+        *rootNode = {};
+        rootNode->name = filename + ":" + scene->mRootNode->mName.C_Str();
+        rootNode->model = transpose(float4x4((float*)&scene->mRootNode->mTransformation));
+        parseNodes(scene, scene->mRootNode, rootNode, meshList);
+
+        return true;
     }
+
+    return false;
+}
+
+void MoDestroyNode(MoNode node)
+{
+    for (std::uint32_t i = 0; i < node->childCount; ++i)
+    {
+        MoDestroyNode(node->pChildren[i]);
+    }
+    free(const_cast<MoNode*>(node->pChildren));
+    delete node;
+}
+
+void MoUnloadAsset(MoNode rootNode, MoMeshList meshList)
+{
+    for (std::uint32_t i = 0; i < meshList->triangleListCount; ++i)
+    {
+        MoTriangleList triangleList = meshList->pTriangleLists[i];
+        free(const_cast<MoTriangle*>(triangleList->pTriangles));
+        delete triangleList;
+    }
+    free(const_cast<MoTriangleList*>(meshList->pTriangleLists));
+    delete meshList;
+
+    MoDestroyNode(rootNode);
 }
 
 /*

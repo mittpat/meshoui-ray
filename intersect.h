@@ -48,14 +48,14 @@ class MoBVH
 {
 public:
     MoBVH() {}
-    MoBVH(const std::vector<MoTriangle>& triangles, std::uint32_t leafSize = 4);
+    MoBVH(MoTriangle* pTriangles, uint32_t triangleCount);
     bool getIntersection(const linalg::aliases::float3& origin, const linalg::aliases::float3& direction,
                          MoIntersection* intersection, bool anyHit = false) const;
 
     std::uint32_t nodeCount;
     std::uint32_t leafCount;
-    std::uint32_t leafSize;
-    std::vector<MoTriangle> triangles;
+    MoTriangle* triangles;
+    uint32_t triangleCount;
 
     struct Split
     {
