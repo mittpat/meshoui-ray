@@ -1,60 +1,11 @@
 #include "assets.h"
+#include "carray.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
 #include <experimental/filesystem>
-
-namespace
-{
-    std::uint32_t nextPowerOfTwo(std::uint32_t v)
-    {
-        v--;
-        v |= v >> 1;
-        v |= v >> 2;
-        v |= v >> 4;
-        v |= v >> 8;
-        v |= v >> 16;
-        v++;
-        return v;
-    }
-
-    template<typename T>
-    void carray_resize(const T** array, std::uint32_t* currentSize, std::uint32_t newSize)
-    {
-        T** local = const_cast<T**>(array);
-
-        std::uint32_t previous = nextPowerOfTwo(*currentSize);
-        std::uint32_t next = nextPowerOfTwo(newSize);
-        if (previous != next)
-        {
-            *local = reinterpret_cast<T*>(realloc(*local, next * sizeof(T)));
-        }
-        *currentSize = newSize;
-    }
-
-    template<typename T>
-    void carray_push_back(const T** array, std::uint32_t* size, T value)
-    {
-        T** local = const_cast<T**>(array);
-
-        std::uint32_t previous = nextPowerOfTwo(*size);
-        std::uint32_t next = nextPowerOfTwo(++(*size));
-        if (previous != next)
-        {
-            *local = reinterpret_cast<T*>(realloc(*local, next * sizeof(T)));
-        }
-        (*local)[*size-1] = value;
-    }
-
-    template<typename T>
-    void carray_free(T* array, std::uint32_t* size)
-    {
-        free(array);
-        *size = 0;
-    }
-}
 
 namespace std { namespace filesystem = experimental::filesystem; }
 using namespace linalg;
@@ -105,10 +56,16 @@ bool MoLoadAsset(const std::string& filename, MoNode* pRootNode, MoMeshList* pMe
                 {
                 case 3:
                 {
-                    const_cast<MoTriangle&>(triangleList->pTriangles[faceIdx]) =  {
-                        float3((float*)&mesh->mVertices[face->mIndices[0]]),
-                        float3((float*)&mesh->mVertices[face->mIndices[1]]),
-                        float3((float*)&mesh->mVertices[face->mIndices[2]])};
+                    MoTriangle& triangle = const_cast<MoTriangle&>(triangleList->pTriangles[faceIdx]);
+                    triangle.v0 = float3((float*)&mesh->mVertices[face->mIndices[0]]);
+                    triangle.v1 = float3((float*)&mesh->mVertices[face->mIndices[1]]);
+                    triangle.v2 = float3((float*)&mesh->mVertices[face->mIndices[2]]);
+                    if (mesh->HasTextureCoords(0))
+                    {
+                        triangle.uv0 = float2((float*)&mesh->mTextureCoords[0][face->mIndices[0]]);
+                        triangle.uv1 = float2((float*)&mesh->mTextureCoords[0][face->mIndices[1]]);
+                        triangle.uv2 = float2((float*)&mesh->mTextureCoords[0][face->mIndices[2]]);
+                    }
                     break;
                 }
                 default:
@@ -117,7 +74,11 @@ bool MoLoadAsset(const std::string& filename, MoNode* pRootNode, MoMeshList* pMe
                 }
             }
 
-            triangleList->bvh = MoBVH(const_cast<MoTriangle*>(triangleList->pTriangles), triangleList->triangleCount);
+            MoCreateBVHAlgorithm algo;
+            // 3d space
+            algo.getBoundingBox = [](const MoTriangle& object) -> MoBBox { return object.getBoundingBox(); };
+            algo.getCentroid = [](const MoTriangle& object) -> float3 { return object.getCentroid(); };
+            moCreateBVH(triangleList->pTriangles, triangleList->triangleCount, &triangleList->bvh, &algo);
         }
 
         MoNode rootNode = *pRootNode = new MoNode_T();
@@ -138,7 +99,7 @@ void MoDestroyNode(MoNode node)
     {
         MoDestroyNode(node->pChildren[i]);
     }
-    free(const_cast<MoNode*>(node->pChildren));
+    carray_free(node->pChildren, &node->childCount);
     delete node;
 }
 
@@ -147,10 +108,11 @@ void MoUnloadAsset(MoNode rootNode, MoMeshList meshList)
     for (std::uint32_t i = 0; i < meshList->triangleListCount; ++i)
     {
         MoTriangleList triangleList = meshList->pTriangleLists[i];
-        free(const_cast<MoTriangle*>(triangleList->pTriangles));
+        moDestroyBVH(triangleList->bvh);
+        carray_free(triangleList->pTriangles, &triangleList->triangleCount);
         delete triangleList;
     }
-    free(const_cast<MoTriangleList*>(meshList->pTriangleLists));
+    carray_free(meshList->pTriangleLists, &meshList->triangleListCount);
     delete meshList;
 
     MoDestroyNode(rootNode);

@@ -1,4 +1,5 @@
 #include "intersect.h"
+#include "carray.h"
 
 #include <algorithm>
 #include <limits>
@@ -13,8 +14,7 @@ namespace
     };
 
     // Adapted from the Möller–Trumbore intersection algorithm
-    bool rayTriangleIntersect(const linalg::aliases::float3 & origin,
-                              const linalg::aliases::float3 & direction,
+    bool rayTriangleIntersect(const MoRay& ray,
                               const MoTriangle & triangle,
                               linalg::aliases::float3 & intersectionPoint)
     {
@@ -24,7 +24,7 @@ namespace
         const linalg::aliases::float3 & vertex2 = triangle.v2;
         const linalg::aliases::float3 edge1 = vertex1 - vertex0;
         const linalg::aliases::float3 edge2 = vertex2 - vertex0;
-        const linalg::aliases::float3 h = linalg::cross(direction, edge2);
+        const linalg::aliases::float3 h = linalg::cross(ray.direction, edge2);
         const float a = linalg::dot(edge1, h);
         if (a > -EPSILON && a < EPSILON)
         {
@@ -33,7 +33,7 @@ namespace
         }
 
         const float f = 1.0/a;
-        const linalg::aliases::float3 s = origin - vertex0;
+        const linalg::aliases::float3 s = ray.origin - vertex0;
         const float u = f * linalg::dot(s, h);
         if (u < 0.0 || u > 1.0)
         {
@@ -41,7 +41,7 @@ namespace
         }
 
         const linalg::aliases::float3 q = linalg::cross(s, edge1);
-        const float v = f * linalg::dot(direction, q);
+        const float v = f * linalg::dot(ray.direction, q);
         if (v < 0.0 || u + v > 1.0)
         {
             return false;
@@ -52,7 +52,7 @@ namespace
         if (t > EPSILON)
         {
             // ray intersection
-            intersectionPoint = origin + direction * t;
+            intersectionPoint = ray.origin + ray.direction * t;
             return true;
         }
 
@@ -78,6 +78,24 @@ MoBBox::MoBBox(const float3& point)
     extent = max - min;
 }
 
+std::uint32_t MoBBox::longestSide() const
+{
+    std::uint32_t dimension = 0;
+    if (extent.y > extent.x)
+    {
+        dimension = 1;
+        if (extent.z > extent.y)
+        {
+            dimension = 2;
+        }
+    }
+    else if (extent.z > extent.x)
+    {
+        dimension = 2;
+    }
+    return dimension;
+}
+
 void MoBBox::expandToInclude(const float3& point)
 {
     min.x = std::min(min.x, point.x);
@@ -101,22 +119,22 @@ void MoBBox::expandToInclude(const MoBBox& box)
 }
 
 // adapted from Tavian Barnes' "Fast, Branchless Ray/Bounding Box Intersections"
-bool MoBBox::intersect(const float3& origin, const float3& oneOverDirection, float* t_near, float* t_far) const
+bool MoBBox::intersect(const MoRay& ray, float* t_near, float* t_far) const
 {
-    float tx1 = (min.x - origin.x) * oneOverDirection.x;
-    float tx2 = (max.x - origin.x) * oneOverDirection.x;
+    float tx1 = (min.x - ray.origin.x) * ray.oneOverDirection.x;
+    float tx2 = (max.x - ray.origin.x) * ray.oneOverDirection.x;
 
     float tmin = std::min(tx1, tx2);
     float tmax = std::max(tx1, tx2);
 
-    float ty1 = (min.y - origin.y) * oneOverDirection.y;
-    float ty2 = (max.y - origin.y) * oneOverDirection.y;
+    float ty1 = (min.y - ray.origin.y) * ray.oneOverDirection.y;
+    float ty2 = (max.y - ray.origin.y) * ray.oneOverDirection.y;
 
     tmin = std::max(tmin, std::min(ty1, ty2));
     tmax = std::min(tmax, std::max(ty1, ty2));
 
-    float tz1 = (min.z - origin.z) * oneOverDirection.z;
-    float tz2 = (max.z - origin.z) * oneOverDirection.z;
+    float tz1 = (min.z - ray.origin.z) * ray.oneOverDirection.z;
+    float tz2 = (max.z - ray.origin.z) * ray.oneOverDirection.z;
 
     tmin = std::max(tmin, std::min(tz1, tz2));
     tmax = std::min(tmax, std::max(tz1, tz2));
@@ -130,14 +148,59 @@ bool MoBBox::intersect(const float3& origin, const float3& oneOverDirection, flo
     return tmax >= tmin;
 }
 
-// Adapted from Brandon Pelfrey's "A Simple, Optimized Bounding Volume Hierarchy for Ray/Object Intersection Testing"
-MoBVH::MoBVH(MoTriangle *pTriangles, uint32_t _triangleCount)
-    : nodeCount(0)
-    , leafCount(0)
-    , triangles(pTriangles)
-    , triangleCount(_triangleCount)
-    , nodes()
+// Adapted from the Möller–Trumbore intersection algorithm
+bool moRayTriangleIntersect(const MoRay &ray, const MoTriangle &triangle, float3 &intersectionPoint)
 {
+    const float EPSILON = 0.0000001f;
+    const linalg::aliases::float3 & vertex0 = triangle.v0;
+    const linalg::aliases::float3 & vertex1 = triangle.v1;
+    const linalg::aliases::float3 & vertex2 = triangle.v2;
+    const linalg::aliases::float3 edge1 = vertex1 - vertex0;
+    const linalg::aliases::float3 edge2 = vertex2 - vertex0;
+    const linalg::aliases::float3 h = linalg::cross(ray.direction, edge2);
+    const float a = linalg::dot(edge1, h);
+    if (a > -EPSILON && a < EPSILON)
+    {
+        // This ray is parallel to this triangle.
+        return false;
+    }
+
+    const float f = 1.0/a;
+    const linalg::aliases::float3 s = ray.origin - vertex0;
+    const float u = f * linalg::dot(s, h);
+    if (u < 0.0 || u > 1.0)
+    {
+        return false;
+    }
+
+    const linalg::aliases::float3 q = linalg::cross(s, edge1);
+    const float v = f * linalg::dot(ray.direction, q);
+    if (v < 0.0 || u + v > 1.0)
+    {
+        return false;
+    }
+
+    // At this stage we can compute t to find out where the intersection point is on the line.
+    const float t = f * linalg::dot(edge2, q);
+    if (t > EPSILON)
+    {
+        // ray intersection
+        intersectionPoint = ray.origin + ray.direction * t;
+        return true;
+    }
+
+    // This means that there is a line intersection but not a ray intersection.
+    return false;
+}
+
+void moCreateBVH(const MoTriangle *pObjects, uint32_t objectCount, MoBVH* pBVH, MoCreateBVHAlgorithm *pAlgorithm)
+{
+    MoBVH bvh = *pBVH = new MoBVH_T();
+    *bvh = {};
+    carray_resize(&bvh->pObjects, &bvh->objectCount, objectCount);
+    carray_copy(pObjects, bvh->pObjects, bvh->objectCount);
+    bvh->splitNodeCount = 0;
+
     std::uint32_t stackPtr = 0;
 
     struct Entry
@@ -146,15 +209,17 @@ MoBVH::MoBVH(MoTriangle *pTriangles, uint32_t _triangleCount)
         std::uint32_t start;
         std::uint32_t end;
     };
-    std::vector<Entry> entries(1);
+    Entry* entries = {};
+    std::uint32_t entryCount = 0;
+    carray_resize(&entries, &entryCount, 1);
     entries[stackPtr].start = 0;
-    entries[stackPtr].end = triangleCount;
+    entries[stackPtr].end = bvh->objectCount;
     entries[stackPtr].parent = Node_Root;
     stackPtr++;
 
-    Split node;
-    nodes.reserve(triangleCount * 2);
+    std::uint32_t splitNodeCount = 0;
 
+    MoBVHSplitNode splitNode;
     while (stackPtr > 0)
     {
         Entry &entry = entries[--stackPtr];
@@ -162,65 +227,53 @@ MoBVH::MoBVH(MoTriangle *pTriangles, uint32_t _triangleCount)
         std::uint32_t end = entry.end;
         std::uint32_t count = end - start;
 
-        nodeCount++;
-        node.start = start;
-        node.count = count;
-        node.offset = Node_Untouched;
+        splitNodeCount++;
+        splitNode.start = start;
+        splitNode.count = count;
+        splitNode.offset = Node_Untouched;
 
-        MoBBox boundingBox(triangles[start].getBoundingBox());
-        MoBBox boundingBoxCentroids(triangles[start].getCentroid());
+        MoBBox boundingBox = pAlgorithm->getBoundingBox(bvh->pObjects[start]);
+        MoBBox boundingBoxCentroids = pAlgorithm->getCentroid(bvh->pObjects[start]);
         for (std::uint32_t i = start + 1; i < end; ++i)
         {
-            boundingBox.expandToInclude(triangles[i].getBoundingBox());
-            boundingBoxCentroids.expandToInclude(triangles[i].getCentroid());
+            boundingBox.expandToInclude(pAlgorithm->getBoundingBox(bvh->pObjects[i]));
+            boundingBoxCentroids.expandToInclude(pAlgorithm->getCentroid(bvh->pObjects[i]));
         }
-        node.boundingBox = boundingBox;
+        splitNode.boundingBox = boundingBox;
 
         // we're at the leaf
         if (count <= 1)
         {
-            node.offset = 0;
-            leafCount++;
+            splitNode.offset = 0;
         }
 
-        nodes.push_back(node);
+        carray_push_back(&bvh->pSplitNodes, &bvh->splitNodeCount, splitNode);
         if (entry.parent != Node_Root)
         {
-            nodes[entry.parent].offset--;
-            if (nodes[entry.parent].offset == Node_TouchedTwice)
+            MoBVHSplitNode & splitNode = const_cast<MoBVHSplitNode*>(bvh->pSplitNodes)[entry.parent];
+            splitNode.offset--;
+            if (splitNode.offset == Node_TouchedTwice)
             {
-                nodes[entry.parent].offset = nodeCount - 1 - entry.parent;
+                splitNode.offset = splitNodeCount - 1 - entry.parent;
             }
         }
 
-        if (node.offset == 0)
+        if (splitNode.offset == 0)
         {
             continue;
         }
 
         // find longest bbox side
-        std::uint32_t splitDimension = 0;
-        if (boundingBoxCentroids.extent.y > boundingBoxCentroids.extent.x)
-        {
-            splitDimension = 1;
-            if (boundingBoxCentroids.extent.z > boundingBoxCentroids.extent.y)
-            {
-                splitDimension = 2;
-            }
-        }
-        else if (boundingBoxCentroids.extent.z > boundingBoxCentroids.extent.x)
-        {
-            splitDimension = 2;
-        }
-
+        std::uint32_t splitDimension = boundingBoxCentroids.longestSide();
         float splitLength = .5f * (boundingBoxCentroids.min[splitDimension] + boundingBoxCentroids.max[splitDimension]);
 
         std::uint32_t mid = start;
         for (std::uint32_t i = start; i < end; ++i)
         {
-            if (triangles[i].getCentroid()[splitDimension] < splitLength)
+            if (pAlgorithm->getCentroid(bvh->pObjects[i])[splitDimension] < splitLength)
             {
-                std::swap(triangles[i], triangles[mid]);
+                MoTriangle* lObjects = const_cast<MoTriangle*>(bvh->pObjects);
+                std::swap(lObjects[i], lObjects[mid]);
                 ++mid;
             }
         }
@@ -231,32 +284,36 @@ MoBVH::MoBVH(MoTriangle *pTriangles, uint32_t _triangleCount)
         }
 
         // left
-        if (entries.size() <= stackPtr)
-            entries.push_back({});
+        if (entryCount <= stackPtr)
+            carray_push_back(&entries, &entryCount, {});
         entries[stackPtr].start = mid;
         entries[stackPtr].end = end;
-        entries[stackPtr].parent = nodeCount - 1;
+        entries[stackPtr].parent = splitNodeCount - 1;
         stackPtr++;
 
         // right
-        if (entries.size() <= stackPtr)
-            entries.push_back({});
+        if (entryCount <= stackPtr)
+            carray_push_back(&entries, &entryCount, {});
         entries[stackPtr].start = start;
         entries[stackPtr].end = mid;
-        entries[stackPtr].parent = nodeCount - 1;
+        entries[stackPtr].parent = splitNodeCount - 1;
         stackPtr++;
     }
 
-    nodes.resize(nodeCount);
+    carray_resize(&bvh->pSplitNodes, &bvh->splitNodeCount, splitNodeCount);
+    carray_free(entries, &entryCount);
 }
 
-bool MoBVH::getIntersection(const float3& origin, const float3& direction,
-                                              MoIntersection* intersection, bool anyHit) const
+void moDestroyBVH(MoBVH bvh)
 {
-    float3 oneOverDirection(1 / direction.x, 1 / direction.y, 1 / direction.z);
+    carray_free(bvh->pObjects, &bvh->objectCount);
+    carray_free(bvh->pSplitNodes, &bvh->splitNodeCount);
+    delete bvh;
+}
 
-    intersection->distance = std::numeric_limits<float>::max();
-    intersection->object = nullptr;
+bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoIntersectBVHAlgorithm* pAlgorithm)
+{
+    float intersectionDistance = std::numeric_limits<float>::max();
     float bbhits[4];
     std::uint32_t closer, other;
 
@@ -277,9 +334,9 @@ bool MoBVH::getIntersection(const float3& origin, const float3& direction,
         std::uint32_t index = traversal[stackPtr].index;
         float near = traversal[stackPtr].distance;
         stackPtr--;
-        const Split& node = nodes[index];
+        const MoBVHSplitNode& node = bvh->pSplitNodes[index];
 
-        if (near > intersection->distance)
+        if (near > intersectionDistance)
         {
             continue;
         }
@@ -288,28 +345,22 @@ bool MoBVH::getIntersection(const float3& origin, const float3& direction,
         {
             for (std::uint32_t i = 0; i < node.count; ++i)
             {
-                MoIntersection current;
-
-                const MoTriangle& obj = triangles[node.start + i];
-                if (rayTriangleIntersect(origin, direction, obj, current.point))
+                const MoTriangle& obj = bvh->pObjects[node.start + i];
+                float currentDistance = pAlgorithm->intersectObj(ray, obj);
+                if (currentDistance <= 0.0)
                 {
-                    current.object = &obj;
-                    current.distance = length(current.point - origin);
-                    if (anyHit)
-                    {
-                        return true;
-                    }
-                    if (current.distance < intersection->distance)
-                    {
-                        *intersection = current;
-                    }
+                    return true;
+                }
+                if (currentDistance < intersectionDistance)
+                {
+                    intersectionDistance = currentDistance;
                 }
             }
         }
         else
         {
-            bool hitLeft = nodes[index + 1].boundingBox.intersect(origin, oneOverDirection, &bbhits[0], &bbhits[1]);
-            bool hitRight = nodes[index + node.offset].boundingBox.intersect(origin, oneOverDirection, &bbhits[2], &bbhits[3]);
+            bool hitLeft = pAlgorithm->intersectBBox(ray, bvh->pSplitNodes[index + 1].boundingBox, &bbhits[0], &bbhits[1]);
+            bool hitRight = pAlgorithm->intersectBBox(ray, bvh->pSplitNodes[index + node.offset].boundingBox, &bbhits[2], &bbhits[3]);
 
             if (hitLeft && hitRight)
             {
@@ -349,7 +400,7 @@ bool MoBVH::getIntersection(const float3& origin, const float3& direction,
         }
     }
 
-    return intersection->object != nullptr;
+    return intersectionDistance < std::numeric_limits<float>::max();
 }
 
 /*

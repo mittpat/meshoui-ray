@@ -58,6 +58,25 @@ int main(int, char**)
                 threads.emplace_back(std::thread([&, row]()
                 {
 #endif
+                    MoIntersectBVHAlgorithm intersectAlgorithm;
+                    intersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object) -> float
+                    {
+                        float3 intersectionPoint;
+                        if (moRayTriangleIntersect(ray, object, intersectionPoint))
+                        {
+#define MO_RAY_ANY
+#ifdef MO_RAY_ANY
+                            return 0.0;
+#else
+                            return length(intersectionPoint - ray.origin);
+#endif
+                        }
+                        return std::numeric_limits<float>::max();
+                    };
+                    intersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float* t_near, float* t_far) -> bool
+                    {
+                        return bbox.intersect(ray, t_near, t_far);
+                    };
                     for (std::uint32_t column = 0, width = resolution[0]; column < width; ++column)
                     {
                         std::uint32_t index = row * resolution[0] + column;
@@ -67,8 +86,7 @@ int main(int, char**)
                         float3 sampleDirection = mul(cameraWorldTransform, float4(1, x, y, 0)).xyz();
                         sampleDirection = normalize(sampleDirection);
 
-                        MoIntersection intersectionInfo;
-                        if (node->mesh->bvh.getIntersection(eye, sampleDirection, &intersectionInfo, false))
+                        if (moIntersectBVH(node->mesh->bvh, MoRay(eye, sampleDirection), &intersectAlgorithm))
                         {
                             output[index] = { 0,0,0,255 };
                         }

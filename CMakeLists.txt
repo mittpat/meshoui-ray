@@ -7,6 +7,7 @@ add_subdirectory(3rdparty)
 
 add_executable(meshouiray
     main.cpp
+    carray.h
     assets.h assets.cpp
     intersect.h intersect.cpp)
 
