@@ -79,6 +79,11 @@ bool MoLoadAsset(const std::string& filename, MoNode* pRootNode, MoMeshList* pMe
             algo.getBoundingBox = [](const MoTriangle& object) -> MoBBox { return object.getBoundingBox(); };
             algo.getCentroid = [](const MoTriangle& object) -> float3 { return object.getCentroid(); };
             moCreateBVH(triangleList->pTriangles, triangleList->triangleCount, &triangleList->bvh, &algo);
+
+            // uv space
+            algo.getBoundingBox = [](const MoTriangle& object) -> MoBBox { return object.getUVBoundingBox(); };
+            algo.getCentroid = [](const MoTriangle& object) -> float3 { return object.getUVCentroid(); };
+            moCreateBVH(triangleList->pTriangles, triangleList->triangleCount, &triangleList->bvhUV, &algo);
         }
 
         MoNode rootNode = *pRootNode = new MoNode_T();
@@ -109,6 +114,7 @@ void MoUnloadAsset(MoNode rootNode, MoMeshList meshList)
     {
         MoTriangleList triangleList = meshList->pTriangleLists[i];
         moDestroyBVH(triangleList->bvh);
+        moDestroyBVH(triangleList->bvhUV);
         carray_free(triangleList->pTriangles, &triangleList->triangleCount);
         delete triangleList;
     }

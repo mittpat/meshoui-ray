@@ -12,53 +12,6 @@ namespace
         Node_TouchedTwice = 0xfffffffd,
         Node_Root         = 0xfffffffc,
     };
-
-    // Adapted from the Möller–Trumbore intersection algorithm
-    bool rayTriangleIntersect(const MoRay& ray,
-                              const MoTriangle & triangle,
-                              linalg::aliases::float3 & intersectionPoint)
-    {
-        const float EPSILON = 0.0000001f;
-        const linalg::aliases::float3 & vertex0 = triangle.v0;
-        const linalg::aliases::float3 & vertex1 = triangle.v1;
-        const linalg::aliases::float3 & vertex2 = triangle.v2;
-        const linalg::aliases::float3 edge1 = vertex1 - vertex0;
-        const linalg::aliases::float3 edge2 = vertex2 - vertex0;
-        const linalg::aliases::float3 h = linalg::cross(ray.direction, edge2);
-        const float a = linalg::dot(edge1, h);
-        if (a > -EPSILON && a < EPSILON)
-        {
-            // This ray is parallel to this triangle.
-            return false;
-        }
-
-        const float f = 1.0/a;
-        const linalg::aliases::float3 s = ray.origin - vertex0;
-        const float u = f * linalg::dot(s, h);
-        if (u < 0.0 || u > 1.0)
-        {
-            return false;
-        }
-
-        const linalg::aliases::float3 q = linalg::cross(s, edge1);
-        const float v = f * linalg::dot(ray.direction, q);
-        if (v < 0.0 || u + v > 1.0)
-        {
-            return false;
-        }
-
-        // At this stage we can compute t to find out where the intersection point is on the line.
-        const float t = f * linalg::dot(edge2, q);
-        if (t > EPSILON)
-        {
-            // ray intersection
-            intersectionPoint = ray.origin + ray.direction * t;
-            return true;
-        }
-
-        // This means that there is a line intersection but not a ray intersection.
-        return false;
-    }
 }
 
 using namespace linalg;
@@ -118,6 +71,13 @@ void MoBBox::expandToInclude(const MoBBox& box)
     extent = max - min;
 }
 
+bool MoBBox::contains(const float3 &point) const
+{
+    return point.x >= min.x && point.x <= max.x &&
+           point.y >= min.y && point.x <= max.y &&
+           point.z >= min.z && point.x <= max.z;
+}
+
 // adapted from Tavian Barnes' "Fast, Branchless Ray/Bounding Box Intersections"
 bool MoBBox::intersect(const MoRay& ray, float* t_near, float* t_far) const
 {
@@ -152,12 +112,12 @@ bool MoBBox::intersect(const MoRay& ray, float* t_near, float* t_far) const
 bool moRayTriangleIntersect(const MoRay &ray, const MoTriangle &triangle, float3 &intersectionPoint)
 {
     const float EPSILON = 0.0000001f;
-    const linalg::aliases::float3 & vertex0 = triangle.v0;
-    const linalg::aliases::float3 & vertex1 = triangle.v1;
-    const linalg::aliases::float3 & vertex2 = triangle.v2;
-    const linalg::aliases::float3 edge1 = vertex1 - vertex0;
-    const linalg::aliases::float3 edge2 = vertex2 - vertex0;
-    const linalg::aliases::float3 h = linalg::cross(ray.direction, edge2);
+    const float3 & vertex0 = triangle.v0;
+    const float3 & vertex1 = triangle.v1;
+    const float3 & vertex2 = triangle.v2;
+    const float3 edge1 = vertex1 - vertex0;
+    const float3 edge2 = vertex2 - vertex0;
+    const float3 h = linalg::cross(ray.direction, edge2);
     const float a = linalg::dot(edge1, h);
     if (a > -EPSILON && a < EPSILON)
     {
@@ -166,14 +126,14 @@ bool moRayTriangleIntersect(const MoRay &ray, const MoTriangle &triangle, float3
     }
 
     const float f = 1.0/a;
-    const linalg::aliases::float3 s = ray.origin - vertex0;
+    const float3 s = ray.origin - vertex0;
     const float u = f * linalg::dot(s, h);
     if (u < 0.0 || u > 1.0)
     {
         return false;
     }
 
-    const linalg::aliases::float3 q = linalg::cross(s, edge1);
+    const float3 q = linalg::cross(s, edge1);
     const float v = f * linalg::dot(ray.direction, q);
     if (v < 0.0 || u + v > 1.0)
     {
@@ -193,6 +153,21 @@ bool moRayTriangleIntersect(const MoRay &ray, const MoTriangle &triangle, float3
     return false;
 }
 
+bool moTexcoordInTriangleUV(float2 tex, const MoTriangle& triangle)
+{
+    float s = triangle.uv0.y * triangle.uv2.x - triangle.uv0.x * triangle.uv2.y + (triangle.uv2.y - triangle.uv0.y) * tex.x + (triangle.uv0.x - triangle.uv2.x) * tex.y;
+    float t = triangle.uv0.x * triangle.uv1.y - triangle.uv0.y * triangle.uv1.x + (triangle.uv0.y - triangle.uv1.y) * tex.x + (triangle.uv1.x - triangle.uv0.x) * tex.y;
+
+    if ((s < 0) != (t < 0))
+        return false;
+
+    float area = -triangle.uv1.y * triangle.uv2.x + triangle.uv0.y * (triangle.uv2.x - triangle.uv1.x) + triangle.uv0.x * (triangle.uv1.y - triangle.uv2.y) + triangle.uv1.x * triangle.uv2.y;
+
+    return area < 0 ?
+            (s <= 0 && s + t >= area) :
+            (s >= 0 && s + t <= area);
+}
+
 void moCreateBVH(const MoTriangle *pObjects, uint32_t objectCount, MoBVH* pBVH, MoCreateBVHAlgorithm *pAlgorithm)
 {
     MoBVH bvh = *pBVH = new MoBVH_T();
@@ -200,7 +175,6 @@ void moCreateBVH(const MoTriangle *pObjects, uint32_t objectCount, MoBVH* pBVH, 
     carray_resize(&bvh->pObjects, &bvh->objectCount, objectCount);
     carray_copy(pObjects, bvh->pObjects, bvh->objectCount);
     bvh->splitNodeCount = 0;
-
     std::uint32_t stackPtr = 0;
 
     struct Entry

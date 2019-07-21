@@ -11,6 +11,7 @@ typedef struct MoTriangleList_T
     const MoTriangle* pTriangles;
     uint32_t          triangleCount;
     MoBVH             bvh;
+    MoBVH             bvhUV;
 }* MoTriangleList;
 
 typedef struct MoMeshList_T

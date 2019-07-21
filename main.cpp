@@ -17,10 +17,50 @@ using namespace linalg::aliases;
 
 int main(int, char**)
 {
+    MoIntersectBVHAlgorithm intersectAlgorithm;
+    intersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object) -> float
+    {
+        float3 intersectionPoint;
+        if (moRayTriangleIntersect(ray, object, intersectionPoint))
+        {
+#define MO_RAY_ANY
+#ifdef MO_RAY_ANY
+            return 0.0;
+#else
+            return length(intersectionPoint - ray.origin);
+#endif
+        }
+        return std::numeric_limits<float>::max();
+    };
+    intersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float* t_near, float* t_far) -> bool
+    {
+        return bbox.intersect(ray, t_near, t_far);
+    };
+
+
+    MoIntersectBVHAlgorithm uvIntersectAlgorithm;
+    uvIntersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object) -> float
+    {
+        if (moTexcoordInTriangleUV(ray.origin.xy(), object))
+        {
+#ifdef MO_RAY_ANY
+            return 0.0;
+#else
+            return length(intersectionPoint - ray.origin);
+#endif
+        }
+        return std::numeric_limits<float>::max();
+    };
+    uvIntersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float* t_near, float* t_far) -> bool
+    {
+        return bbox.intersect(ray, t_near, t_far);
+    };
+
+
     MoNode root;
     MoMeshList meshes;
 
-    MoLoadAsset("teapot.dae", &root, &meshes);
+    MoLoadAsset("_teapot.dae", &root, &meshes);
 
     int total = 0;
     std::function<void(MoNode, const float4x4 &)> draw = [&](MoNode node, const float4x4 & model)
@@ -35,7 +75,8 @@ int main(int, char**)
             };
 
             int2 resolution(2048,2048);
-            std::vector<Sample> output(resolution[0] * resolution[1]);
+            std::vector<Sample> outputUV(resolution[0] * resolution[1], {0,0,0,0});
+            std::vector<Sample> output3D(resolution[0] * resolution[1], {0,0,0,0});
 
             double fov = 75.0 * 3.14159 / 360;
             double scale = std::tan(fov * 0.5);
@@ -58,41 +99,32 @@ int main(int, char**)
                 threads.emplace_back(std::thread([&, row]()
                 {
 #endif
-                    MoIntersectBVHAlgorithm intersectAlgorithm;
-                    intersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object) -> float
-                    {
-                        float3 intersectionPoint;
-                        if (moRayTriangleIntersect(ray, object, intersectionPoint))
-                        {
-#define MO_RAY_ANY
-#ifdef MO_RAY_ANY
-                            return 0.0;
-#else
-                            return length(intersectionPoint - ray.origin);
-#endif
-                        }
-                        return std::numeric_limits<float>::max();
-                    };
-                    intersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float* t_near, float* t_far) -> bool
-                    {
-                        return bbox.intersect(ray, t_near, t_far);
-                    };
                     for (std::uint32_t column = 0, width = resolution[0]; column < width; ++column)
                     {
+                        float2 uv(column / float(resolution[0]), row / float(resolution[1]));
+
                         std::uint32_t index = row * resolution[0] + column;
+                        if (moIntersectBVH(node->mesh->bvhUV, MoRay(float3(uv, -1.0f), {0,0,1}), &uvIntersectAlgorithm))
+                        {
+                            outputUV[index] = { uint8_t(uv.x*255),uint8_t(uv.y*255),0,255 };
+                        }
+                        else
+                        {
+                            outputUV[index] = { 255,255,255,255 };
+                        }
+
 
                         double x = (2 * (column + 0.5) / double(resolution[0]) - 1) * imageAspectRatio * scale;
                         double y = (1 - 2 * (row + 0.5) / double(resolution[1])) * scale;
                         float3 sampleDirection = mul(cameraWorldTransform, float4(1, x, y, 0)).xyz();
                         sampleDirection = normalize(sampleDirection);
-
                         if (moIntersectBVH(node->mesh->bvh, MoRay(eye, sampleDirection), &intersectAlgorithm))
                         {
-                            output[index] = { 0,0,0,255 };
+                            output3D[index] = { 0,0,0,255 };
                         }
                         else
                         {
-                            output[index] = { 255,255,255,255 };
+                            output3D[index] = { 255,255,255,255 };
                         }
                     }
 #ifdef THREADED_RAY
@@ -105,7 +137,8 @@ int main(int, char**)
                 thread.join();
             }
 #endif
-            stbi_write_png((std::string("test") + std::to_string(total++) + ".png").c_str(), resolution[0], resolution[1], 4, output.data(), 4 * resolution[0]);
+            stbi_write_png((std::string("test_uv_") + std::to_string(total) + ".png").c_str(), resolution[0], resolution[1], 4, outputUV.data(), 4 * resolution[0]);
+            stbi_write_png((std::string("test_3d_") + std::to_string(total++) + ".png").c_str(), resolution[0], resolution[1], 4, output3D.data(), 4 * resolution[0]);
         }
         for (std::uint32_t i = 0; i < node->childCount; ++i)
         {
