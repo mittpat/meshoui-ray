@@ -71,13 +71,6 @@ void MoBBox::expandToInclude(const MoBBox& box)
     extent = max - min;
 }
 
-bool MoBBox::contains(const float3 &point) const
-{
-    return point.x >= min.x && point.x <= max.x &&
-           point.y >= min.y && point.x <= max.y &&
-           point.z >= min.z && point.x <= max.z;
-}
-
 // adapted from Tavian Barnes' "Fast, Branchless Ray/Bounding Box Intersections"
 bool MoBBox::intersect(const MoRay& ray, float* t_near, float* t_far) const
 {
@@ -106,6 +99,17 @@ bool MoBBox::intersect(const MoRay& ray, float* t_near, float* t_far) const
         *t_far = tmax;
 
     return tmax >= tmin;
+}
+
+float3 MoTriangle::interpolate(const float2& uv) const
+{
+    float w0,w1,w2;
+
+    w0 = length(uv - uv0);
+    w1 = length(uv - uv1);
+    w2 = length(uv - uv2);
+
+    return (v0 * w0 + v1 * w1 + v2 * w2) / (w0 + w1 + w2);
 }
 
 // Adapted from the Möller–Trumbore intersection algorithm
@@ -285,7 +289,7 @@ void moDestroyBVH(MoBVH bvh)
     delete bvh;
 }
 
-bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoIntersectBVHAlgorithm* pAlgorithm)
+bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoTriangle& intersection, MoIntersectBVHAlgorithm* pAlgorithm)
 {
     float intersectionDistance = std::numeric_limits<float>::max();
     float bbhits[4];
@@ -323,10 +327,12 @@ bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoIntersectBVHAlgorithm* pAlgor
                 float currentDistance = pAlgorithm->intersectObj(ray, obj);
                 if (currentDistance <= 0.0)
                 {
+                    intersection = obj;
                     return true;
                 }
                 if (currentDistance < intersectionDistance)
                 {
+                    intersection = obj;
                     intersectionDistance = currentDistance;
                 }
             }

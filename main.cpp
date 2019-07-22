@@ -60,7 +60,7 @@ int main(int, char**)
     MoNode root;
     MoMeshList meshes;
 
-    MoLoadAsset("_teapot.dae", &root, &meshes);
+    MoLoadAsset("teapot.dae", &root, &meshes);
 
     int total = 0;
     std::function<void(MoNode, const float4x4 &)> draw = [&](MoNode node, const float4x4 & model)
@@ -74,7 +74,7 @@ int main(int, char**)
                 uint8_t r, g, b, a;
             };
 
-            int2 resolution(2048,2048);
+            int2 resolution(1024,1024);
             std::vector<Sample> outputUV(resolution[0] * resolution[1], {0,0,0,0});
             std::vector<Sample> output3D(resolution[0] * resolution[1], {0,0,0,0});
 
@@ -102,11 +102,24 @@ int main(int, char**)
                     for (std::uint32_t column = 0, width = resolution[0]; column < width; ++column)
                     {
                         float2 uv(column / float(resolution[0]), row / float(resolution[1]));
+                        MoTriangle intersection;
 
-                        std::uint32_t index = row * resolution[0] + column;
-                        if (moIntersectBVH(node->mesh->bvhUV, MoRay(float3(uv, -1.0f), {0,0,1}), &uvIntersectAlgorithm))
+                        std::uint32_t index = (resolution[1] - row - 1) * resolution[0] + column;
+                        if (moIntersectBVH(node->mesh->bvhUV, MoRay(float3(uv, -1.0f), {0,0,1}), intersection, &uvIntersectAlgorithm))
                         {
-                            outputUV[index] = { uint8_t(uv.x*255),uint8_t(uv.y*255),0,255 };
+                            float3 world = intersection.interpolate(uv);
+
+                            auto dir = float3(-100,40,40)-world;
+                            dir = normalize(dir);
+                            if (moIntersectBVH(node->mesh->bvh, MoRay(world+dir*0.0001f,
+                                                                      dir), intersection, &intersectAlgorithm))
+                            {
+                                outputUV[index] = { 0,0,0,255 };
+                            }
+                            else
+                            {
+                                outputUV[index] = { 255,255,255,255 };
+                            }
                         }
                         else
                         {
@@ -114,11 +127,12 @@ int main(int, char**)
                         }
 
 
+                        index = row * resolution[0] + column;
                         double x = (2 * (column + 0.5) / double(resolution[0]) - 1) * imageAspectRatio * scale;
                         double y = (1 - 2 * (row + 0.5) / double(resolution[1])) * scale;
                         float3 sampleDirection = mul(cameraWorldTransform, float4(1, x, y, 0)).xyz();
                         sampleDirection = normalize(sampleDirection);
-                        if (moIntersectBVH(node->mesh->bvh, MoRay(eye, sampleDirection), &intersectAlgorithm))
+                        if (moIntersectBVH(node->mesh->bvh, MoRay(eye, sampleDirection), intersection, &intersectAlgorithm))
                         {
                             output3D[index] = { 0,0,0,255 };
                         }
@@ -137,7 +151,9 @@ int main(int, char**)
                 thread.join();
             }
 #endif
+            // self shadowing test
             stbi_write_png((std::string("test_uv_") + std::to_string(total) + ".png").c_str(), resolution[0], resolution[1], 4, outputUV.data(), 4 * resolution[0]);
+            // simple raycast test
             stbi_write_png((std::string("test_3d_") + std::to_string(total++) + ".png").c_str(), resolution[0], resolution[1], 4, output3D.data(), 4 * resolution[0]);
         }
         for (std::uint32_t i = 0; i < node->childCount; ++i)

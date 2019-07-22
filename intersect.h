@@ -28,7 +28,6 @@ public:
     bool intersect(const MoRay& ray, float* t_near = nullptr, float* t_far = nullptr) const;
     void expandToInclude(const linalg::aliases::float3& point);
     void expandToInclude(const MoBBox& box);
-    bool contains(const linalg::aliases::float3& point) const;
 
     linalg::aliases::float3 min;
     linalg::aliases::float3 max;
@@ -61,6 +60,7 @@ struct MoTriangle
     {
         return linalg::aliases::float3((uv0 + uv1 + uv2) / 3.0f, 0.f);
     }
+    linalg::aliases::float3 interpolate(const linalg::aliases::float2& uv) const;
 };
 
 bool moRayTriangleIntersect(const MoRay& ray, const MoTriangle& triangle, linalg::aliases::float3& intersectionPoint);
@@ -103,7 +103,7 @@ struct MoIntersectBVHAlgorithm
     bool (*intersectBBox)(const MoRay& ray, const MoBBox&, float*, float*);
 };
 
-bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoIntersectBVHAlgorithm* pAlgorithm);
+bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoTriangle &intersection, MoIntersectBVHAlgorithm* pAlgorithm);
 
 /*
 ------------------------------------------------------------------------------

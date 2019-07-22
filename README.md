@@ -2,6 +2,8 @@
 
 ![sample viewer_output](https://raw.githubusercontent.com/mittpat/meshoui-ray/master/screenshot.png)
 
+Efficient baking of self-shadowing to texture on CPU.
+
 Compiling
 -------
 * git submodule update --init --recursive
