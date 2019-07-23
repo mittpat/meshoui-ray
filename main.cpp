@@ -107,18 +107,33 @@ int main(int, char**)
                         std::uint32_t index = (resolution[1] - row - 1) * resolution[0] + column;
                         if (moIntersectBVH(node->mesh->bvhUV, MoRay(float3(uv, -1.0f), {0,0,1}), intersection, &uvIntersectAlgorithm))
                         {
-                            float3 world = intersection.uvInterpolate(uv);
+                            float3 barycentricCoordinates = intersection.uvBarycentric(uv);
+                            float3 world = intersection.v0 * barycentricCoordinates[0]
+                                    + intersection.v1 * barycentricCoordinates[1]
+                                    + intersection.v2 * barycentricCoordinates[2];
 
-                            auto dir = float3(-100,40,40)-world;
-                            dir = normalize(dir);
-                            if (moIntersectBVH(node->mesh->bvh, MoRay(world+dir*0.0001f,
-                                                                      dir), intersection, &intersectAlgorithm))
+                            float3 normal = intersection.n0 * barycentricCoordinates[0]
+                                    + intersection.n1 * barycentricCoordinates[1]
+                                    + intersection.n2 * barycentricCoordinates[2];
+
+                            float3 lightDirection = normalize(float3(-100,40,40) - world);
+
+                            float diffuseFactor = dot(normal, lightDirection);
+                            if (diffuseFactor > 0.0)
                             {
-                                outputUV[index] = { 0,0,0,255 };
+                                if (moIntersectBVH(node->mesh->bvh, MoRay(world + normal * 0.0001f,
+                                                                          lightDirection), intersection, &intersectAlgorithm))
+                                {
+                                    outputUV[index] = { 0,0,0,255 };
+                                }
+                                else
+                                {
+                                    outputUV[index] = { diffuseFactor * 255,diffuseFactor * 255, diffuseFactor * 255,255 };
+                                }
                             }
                             else
                             {
-                                outputUV[index] = { 255,255,255,255 };
+                                outputUV[index] = { 0,0,0,255 };
                             }
                         }
                         else

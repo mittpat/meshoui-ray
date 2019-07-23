@@ -66,6 +66,9 @@ bool MoLoadAsset(const std::string& filename, MoNode* pRootNode, MoMeshList* pMe
                         triangle.uv1 = float2((float*)&mesh->mTextureCoords[0][face->mIndices[1]]);
                         triangle.uv2 = float2((float*)&mesh->mTextureCoords[0][face->mIndices[2]]);
                     }
+                    triangle.n0 = float3((float*)&mesh->mNormals[face->mIndices[0]]);
+                    triangle.n1 = float3((float*)&mesh->mNormals[face->mIndices[1]]);
+                    triangle.n2 = float3((float*)&mesh->mNormals[face->mIndices[2]]);
                     break;
                 }
                 default:

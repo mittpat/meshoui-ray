@@ -101,12 +101,6 @@ bool MoBBox::intersect(const MoRay& ray, float* t_near, float* t_far) const
     return tmax >= tmin;
 }
 
-float3 MoTriangle::uvInterpolate(const float2& uv) const
-{
-    float3 barycentricCoordinates = uvBarycentric(uv);
-    return v0 * barycentricCoordinates[0] + v1 * barycentricCoordinates[1] + v2 * barycentricCoordinates[2];
-}
-
 float3 MoTriangle::uvBarycentric(const float2 &uv) const
 {
     float x[4] = {uv.x, uv0.x, uv1.x, uv2.x};

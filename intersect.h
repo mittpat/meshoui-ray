@@ -38,6 +38,7 @@ struct MoTriangle
 {
     linalg::aliases::float3 v0, v1, v2;
     linalg::aliases::float2 uv0, uv1, uv2;
+    linalg::aliases::float3 n0, n1, n2;
     MoBBox getBoundingBox() const
     {
         MoBBox bb(v0);
@@ -60,7 +61,6 @@ struct MoTriangle
     {
         return linalg::aliases::float3((uv0 + uv1 + uv2) / 3.0f, 0.f);
     }
-    linalg::aliases::float3 uvInterpolate(const linalg::aliases::float2& uv) const;
     linalg::aliases::float3 uvBarycentric(const linalg::aliases::float2& uv) const;
 };
 
