@@ -75,7 +75,7 @@ int main(int, char**)
             };
 
             int2 resolution(1024,1024);
-            std::vector<Sample> outputUV(resolution[0] * resolution[1], {0,0,0,0});
+            std::vector<Sample> outputUV(resolution[0] * resolution[1], {255,255,255,255});
             std::vector<Sample> output3D(resolution[0] * resolution[1], {0,0,0,0});
 
             double fov = 75.0 * 3.14159 / 360;
@@ -107,7 +107,7 @@ int main(int, char**)
                         std::uint32_t index = (resolution[1] - row - 1) * resolution[0] + column;
                         if (moIntersectBVH(node->mesh->bvhUV, MoRay(float3(uv, -1.0f), {0,0,1}), intersection, &uvIntersectAlgorithm))
                         {
-                            float3 world = intersection.interpolate(uv);
+                            float3 world = intersection.uvInterpolate(uv);
 
                             auto dir = float3(-100,40,40)-world;
                             dir = normalize(dir);

@@ -3,6 +3,7 @@
 ![sample viewer_output](https://raw.githubusercontent.com/mittpat/meshoui-ray/master/screenshot.png)
 
 Efficient baking of self-shadowing to texture on CPU.
+Works by raycasting from uv coordinates on the surface of the model to a light source.
 
 Compiling
 -------

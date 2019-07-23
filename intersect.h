@@ -60,7 +60,8 @@ struct MoTriangle
     {
         return linalg::aliases::float3((uv0 + uv1 + uv2) / 3.0f, 0.f);
     }
-    linalg::aliases::float3 interpolate(const linalg::aliases::float2& uv) const;
+    linalg::aliases::float3 uvInterpolate(const linalg::aliases::float2& uv) const;
+    linalg::aliases::float3 uvBarycentric(const linalg::aliases::float2& uv) const;
 };
 
 bool moRayTriangleIntersect(const MoRay& ray, const MoTriangle& triangle, linalg::aliases::float3& intersectionPoint);

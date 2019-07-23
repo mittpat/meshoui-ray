@@ -101,15 +101,29 @@ bool MoBBox::intersect(const MoRay& ray, float* t_near, float* t_far) const
     return tmax >= tmin;
 }
 
-float3 MoTriangle::interpolate(const float2& uv) const
+float3 MoTriangle::uvInterpolate(const float2& uv) const
 {
-    float w0,w1,w2;
+    float3 barycentricCoordinates = uvBarycentric(uv);
+    return v0 * barycentricCoordinates[0] + v1 * barycentricCoordinates[1] + v2 * barycentricCoordinates[2];
+}
 
-    w0 = length(uv - uv0);
-    w1 = length(uv - uv1);
-    w2 = length(uv - uv2);
+float3 MoTriangle::uvBarycentric(const float2 &uv) const
+{
+    float x[4] = {uv.x, uv0.x, uv1.x, uv2.x};
+    float y[4] = {uv.y, uv0.y, uv1.y, uv2.y};
 
-    return (v0 * w0 + v1 * w1 + v2 * w2) / (w0 + w1 + w2);
+    float d = (y[2] - y[3]) * (x[1] - x[3]) + (x[3] - x[2]) * (y[1] - y[3]);
+    float l1 = ((y[2] - y[3]) * (x[0] - x[3]) + (x[3] - x[2]) * (y[0] - y[3]))
+            / d;
+    float l2 = ((y[3] - y[1]) * (x[0] - x[3]) + (x[1] - x[3]) * (y[0] - y[3]))
+            / d;
+    float l3 = 1 - l1 - l2;
+
+#if 0
+    float2 test = l1 * uv0 + l2 * uv1 + l3 * uv2;
+#endif
+
+    return float3(l1, l2, l3);
 }
 
 // Adapted from the Möller–Trumbore intersection algorithm
