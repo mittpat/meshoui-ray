@@ -11,6 +11,12 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
+#define MO_SURFACE_BIAS 0.01f
+#define MO_RAY_ANY
+#define MO_THREADED_RAY
+#define MO_UV_SPREAD 1
+#define MO_SAVE_TO_FILE
+
 namespace std { namespace filesystem = experimental::filesystem; }
 using namespace linalg;
 using namespace linalg::aliases;
@@ -23,7 +29,6 @@ int main(int, char**)
         float3 intersectionPoint;
         if (moRayTriangleIntersect(ray, object, intersectionPoint))
         {
-#define MO_RAY_ANY
 #ifdef MO_RAY_ANY
             return 0.0;
 #else
@@ -75,7 +80,7 @@ int main(int, char**)
             };
 
             int2 resolution(1024,1024);
-            std::vector<Sample> outputUV(resolution[0] * resolution[1], {255,255,255,255});
+            std::vector<Sample> outputUV(resolution[0] * resolution[1], {0,0,0,0});
             std::vector<Sample> output3D(resolution[0] * resolution[1], {0,0,0,0});
 
             double fov = 75.0 * 3.14159 / 360;
@@ -84,13 +89,12 @@ int main(int, char**)
             float4x4 cameraWorldTransform = identity;
             float3 eye(-10,0,0);// = cameraWorldTransform.w.xyz();
 
-#define THREADED_RAY
-#ifdef THREADED_RAY
+#ifdef MO_THREADED_RAY
             std::deque<std::thread> threads;
 #endif
-            for (std::uint32_t row = 0, height = resolution[1]; row < height; ++row)
+            for (int row = 0, height = resolution[1]; row < height; ++row)
             {
-#ifdef THREADED_RAY
+#ifdef MO_THREADED_RAY
                 if (threads.size() > std::thread::hardware_concurrency())
                 {
                     threads.front().join();
@@ -99,9 +103,9 @@ int main(int, char**)
                 threads.emplace_back(std::thread([&, row]()
                 {
 #endif
-                    for (std::uint32_t column = 0, width = resolution[0]; column < width; ++column)
+                    for (int column = 0, width = resolution[0]; column < width; ++column)
                     {
-                        float2 uv(column / float(resolution[0]), row / float(resolution[1]));
+                        float2 uv((column + 0.5) / float(resolution[0]), (row + 0.5) / float(resolution[1]));
                         MoTriangle intersection;
 
                         std::uint32_t index = (resolution[1] - row - 1) * resolution[0] + column;
@@ -121,7 +125,7 @@ int main(int, char**)
                             float diffuseFactor = dot(normal, lightDirection);
                             if (diffuseFactor > 0.0)
                             {
-                                if (moIntersectBVH(node->mesh->bvh, MoRay(world + normal * 0.0001f,
+                                if (moIntersectBVH(node->mesh->bvh, MoRay(world + normal * MO_SURFACE_BIAS,
                                                                           lightDirection), intersection, &intersectAlgorithm))
                                 {
                                     outputUV[index] = { 0,0,0,255 };
@@ -135,10 +139,25 @@ int main(int, char**)
                             {
                                 outputUV[index] = { 0,0,0,255 };
                             }
+
+#ifdef MO_UV_SPREAD
+                            for (int deltax = -MO_UV_SPREAD; deltax <= MO_UV_SPREAD; deltax++)
+                            {
+                                for (int deltay = -MO_UV_SPREAD; deltay <= MO_UV_SPREAD; deltay++)
+                                {
+                                    std::uint32_t index00 =
+                                            (resolution[1] - std::min(height - 1, std::max(0, row + deltay)) - 1) * resolution[0]
+                                                           + std::max(0, std::min(width - 1, column + deltax));
+                                    if (outputUV[index00].a == 0) outputUV[index00] = outputUV[index];
+                                }
+                            }
+#endif
                         }
                         else
                         {
+#ifndef MO_UV_SPREAD
                             outputUV[index] = { 255,255,255,255 };
+#endif
                         }
 
 
@@ -156,20 +175,30 @@ int main(int, char**)
                             output3D[index] = { 255,255,255,255 };
                         }
                     }
-#ifdef THREADED_RAY
+#ifdef MO_THREADED_RAY
                 }));
 #endif
             }
-#ifdef THREADED_RAY
+#ifdef MO_THREADED_RAY
             for (auto & thread : threads)
             {
                 thread.join();
             }
 #endif
+
+#ifdef MO_UV_SPREAD
+            for (std::uint32_t index = 0; index < resolution[0] * resolution[1]; ++index)
+            {
+                if (outputUV[index].a == 0) outputUV[index] = { 255,255,255,255 };
+            }
+#endif
+
+#ifdef MO_SAVE_TO_FILE
             // self shadowing test
             stbi_write_png((std::string("test_uv_") + std::to_string(total) + ".png").c_str(), resolution[0], resolution[1], 4, outputUV.data(), 4 * resolution[0]);
             // simple raycast test
             stbi_write_png((std::string("test_3d_") + std::to_string(total++) + ".png").c_str(), resolution[0], resolution[1], 4, output3D.data(), 4 * resolution[0]);
+#endif
         }
         for (std::uint32_t i = 0; i < node->childCount; ++i)
         {
