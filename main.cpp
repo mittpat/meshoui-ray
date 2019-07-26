@@ -1,67 +1,19 @@
 #include "assets.h"
 
-#include <experimental/filesystem>
-
 #include <linalg.h>
 
-#include <deque>
 #include <functional>
-#include <thread>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
-#define MO_SURFACE_BIAS 0.01f
-#define MO_RAY_ANY
-#define MO_THREADED_RAY
-#define MO_UV_SPREAD 1
 #define MO_SAVE_TO_FILE
 
-namespace std { namespace filesystem = experimental::filesystem; }
 using namespace linalg;
 using namespace linalg::aliases;
 
 int main(int, char**)
 {
-    MoIntersectBVHAlgorithm intersectAlgorithm;
-    intersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object) -> float
-    {
-        float3 intersectionPoint;
-        if (moRayTriangleIntersect(ray, object, intersectionPoint))
-        {
-#ifdef MO_RAY_ANY
-            return 0.0;
-#else
-            return length(intersectionPoint - ray.origin);
-#endif
-        }
-        return std::numeric_limits<float>::max();
-    };
-    intersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float* t_near, float* t_far) -> bool
-    {
-        return bbox.intersect(ray, t_near, t_far);
-    };
-
-
-    MoIntersectBVHAlgorithm uvIntersectAlgorithm;
-    uvIntersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object) -> float
-    {
-        if (moTexcoordInTriangleUV(ray.origin.xy(), object))
-        {
-#ifdef MO_RAY_ANY
-            return 0.0;
-#else
-            return length(intersectionPoint - ray.origin);
-#endif
-        }
-        return std::numeric_limits<float>::max();
-    };
-    uvIntersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float* t_near, float* t_far) -> bool
-    {
-        return bbox.intersect(ray, t_near, t_far);
-    };
-
-
     MoNode root;
     MoMeshList meshes;
 
@@ -72,132 +24,14 @@ int main(int, char**)
     {
         if (node->mesh != nullptr)
         {
-            //model
-
-            struct Sample
-            {
-                uint8_t r, g, b, a;
-            };
-
             int2 resolution(1024,1024);
-            std::vector<Sample> outputUV(resolution[0] * resolution[1], {0,0,0,0});
-            std::vector<Sample> output3D(resolution[0] * resolution[1], {0,0,0,0});
+            std::vector<MoTextureSample> output(resolution[0] * resolution[1], {0,0,0,0});
 
-            double fov = 75.0 * 3.14159 / 360;
-            double scale = std::tan(fov * 0.5);
-            double imageAspectRatio = resolution[0] / double(resolution[1]);
-            float4x4 cameraWorldTransform = identity;
-            float3 eye(-10,0,0);// = cameraWorldTransform.w.xyz();
-
-#ifdef MO_THREADED_RAY
-            std::deque<std::thread> threads;
-#endif
-            for (int row = 0, height = resolution[1]; row < height; ++row)
-            {
-#ifdef MO_THREADED_RAY
-                if (threads.size() > std::thread::hardware_concurrency())
-                {
-                    threads.front().join();
-                    threads.pop_front();
-                }
-                threads.emplace_back(std::thread([&, row]()
-                {
-#endif
-                    for (int column = 0, width = resolution[0]; column < width; ++column)
-                    {
-                        float2 uv((column + 0.5) / float(resolution[0]), (row + 0.5) / float(resolution[1]));
-                        MoTriangle intersection;
-
-                        std::uint32_t index = (resolution[1] - row - 1) * resolution[0] + column;
-                        if (moIntersectBVH(node->mesh->bvhUV, MoRay(float3(uv, -1.0f), {0,0,1}), intersection, &uvIntersectAlgorithm))
-                        {
-                            float3 barycentricCoordinates = intersection.uvBarycentric(uv);
-                            float3 world = intersection.v0 * barycentricCoordinates[0]
-                                    + intersection.v1 * barycentricCoordinates[1]
-                                    + intersection.v2 * barycentricCoordinates[2];
-
-                            float3 normal = intersection.n0 * barycentricCoordinates[0]
-                                    + intersection.n1 * barycentricCoordinates[1]
-                                    + intersection.n2 * barycentricCoordinates[2];
-
-                            float3 lightDirection = normalize(float3(-100,40,40) - world);
-
-                            float diffuseFactor = dot(normal, lightDirection);
-                            if (diffuseFactor > 0.0)
-                            {
-                                if (moIntersectBVH(node->mesh->bvh, MoRay(world + normal * MO_SURFACE_BIAS,
-                                                                          lightDirection), intersection, &intersectAlgorithm))
-                                {
-                                    outputUV[index] = { 0,0,0,255 };
-                                }
-                                else
-                                {
-                                    outputUV[index] = { diffuseFactor * 255,diffuseFactor * 255, diffuseFactor * 255,255 };
-                                }
-                            }
-                            else
-                            {
-                                outputUV[index] = { 0,0,0,255 };
-                            }
-
-#ifdef MO_UV_SPREAD
-                            for (int deltax = -MO_UV_SPREAD; deltax <= MO_UV_SPREAD; deltax++)
-                            {
-                                for (int deltay = -MO_UV_SPREAD; deltay <= MO_UV_SPREAD; deltay++)
-                                {
-                                    std::uint32_t index00 =
-                                            (resolution[1] - std::min(height - 1, std::max(0, row + deltay)) - 1) * resolution[0]
-                                                           + std::max(0, std::min(width - 1, column + deltax));
-                                    if (outputUV[index00].a == 0) outputUV[index00] = outputUV[index];
-                                }
-                            }
-#endif
-                        }
-                        else
-                        {
-#ifndef MO_UV_SPREAD
-                            outputUV[index] = { 255,255,255,255 };
-#endif
-                        }
-
-
-                        index = row * resolution[0] + column;
-                        double x = (2 * (column + 0.5) / double(resolution[0]) - 1) * imageAspectRatio * scale;
-                        double y = (1 - 2 * (row + 0.5) / double(resolution[1])) * scale;
-                        float3 sampleDirection = mul(cameraWorldTransform, float4(1, x, y, 0)).xyz();
-                        sampleDirection = normalize(sampleDirection);
-                        if (moIntersectBVH(node->mesh->bvh, MoRay(eye, sampleDirection), intersection, &intersectAlgorithm))
-                        {
-                            output3D[index] = { 0,0,0,255 };
-                        }
-                        else
-                        {
-                            output3D[index] = { 255,255,255,255 };
-                        }
-                    }
-#ifdef MO_THREADED_RAY
-                }));
-#endif
-            }
-#ifdef MO_THREADED_RAY
-            for (auto & thread : threads)
-            {
-                thread.join();
-            }
-#endif
-
-#ifdef MO_UV_SPREAD
-            for (std::uint32_t index = 0; index < resolution[0] * resolution[1]; ++index)
-            {
-                if (outputUV[index].a == 0) outputUV[index] = { 255,255,255,255 };
-            }
-#endif
+            MoGenerateLightMap(node, output.data(), resolution[0], resolution[1]);
 
 #ifdef MO_SAVE_TO_FILE
             // self shadowing test
-            stbi_write_png((std::string("test_uv_") + std::to_string(total) + ".png").c_str(), resolution[0], resolution[1], 4, outputUV.data(), 4 * resolution[0]);
-            // simple raycast test
-            stbi_write_png((std::string("test_3d_") + std::to_string(total++) + ".png").c_str(), resolution[0], resolution[1], 4, output3D.data(), 4 * resolution[0]);
+            stbi_write_png((std::string("test_uv_") + std::to_string(total) + ".png").c_str(), resolution[0], resolution[1], 4, output.data(), 4 * resolution[0]);
 #endif
         }
         for (std::uint32_t i = 0; i < node->childCount; ++i)

@@ -35,6 +35,13 @@ bool MoLoadAsset(const std::string& filename, MoNode* pRootNode, MoMeshList* pMe
 void MoDestroyNode(MoNode node);
 void MoUnloadAsset(MoNode rootNode, MoMeshList meshList);
 
+struct MoTextureSample
+{
+    uint8_t r, g, b, a;
+};
+
+void MoGenerateLightMap(MoNode node, MoTextureSample* pTextureSamples, std::uint32_t width, std::uint32_t height);
+
 /*
 ------------------------------------------------------------------------------
 This software is available under 2 licenses -- choose whichever you prefer.

@@ -7,6 +7,9 @@
 
 #include <experimental/filesystem>
 
+#include <deque>
+#include <thread>
+
 namespace std { namespace filesystem = experimental::filesystem; }
 using namespace linalg;
 using namespace linalg::aliases;
@@ -125,6 +128,114 @@ void MoUnloadAsset(MoNode rootNode, MoMeshList meshList)
     delete meshList;
 
     MoDestroyNode(rootNode);
+}
+
+void MoGenerateLightMap(MoNode node, MoTextureSample* pTextureSamples, std::uint32_t width, std::uint32_t height)
+{
+#define MO_UV_MULTISAMPLE_OFFSET 1.0f
+#define MO_SURFACE_BIAS 0.01f
+    MoIntersectBVHAlgorithm intersectAlgorithm;
+    intersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object) -> float
+    {
+        float3 intersectionPoint;
+        if (moRayTriangleIntersect(ray, object, intersectionPoint))
+        {
+            return 0.0;
+        }
+        return std::numeric_limits<float>::max();
+    };
+    intersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float* t_near, float* t_far) -> bool
+    {
+        return bbox.intersect(ray, t_near, t_far);
+    };
+
+    MoIntersectBVHAlgorithm uvIntersectAlgorithm;
+    uvIntersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object) -> float
+    {
+        if (moTexcoordInTriangleUV(ray.origin.xy(), object))
+        {
+            return 0.0;
+        }
+        return std::numeric_limits<float>::max();
+    };
+    uvIntersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float* t_near, float* t_far) -> bool
+    {
+        return bbox.intersect(ray, t_near, t_far);
+    };
+
+    std::deque<std::thread> threads;
+    for (int row = 0; row < height; ++row)
+    {
+        if (threads.size() > std::thread::hardware_concurrency())
+        {
+            threads.front().join();
+            threads.pop_front();
+        }
+        threads.emplace_back(std::thread([&, row]()
+        {
+            for (int column = 0; column < width; ++column)
+            {
+                float2 uv((column + 0.5) / float(width), (row + 0.5) / float(height));
+                MoTriangle intersection;
+
+                std::uint32_t index = (height - row - 1) * width + column;
+
+                float3 multisamples[] = {float3(uv, -1.0f),
+                                         float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(width),  MO_UV_MULTISAMPLE_OFFSET / float(height)), -1.0f),
+                                         float3(uv + float2(-MO_UV_MULTISAMPLE_OFFSET / float(width), -MO_UV_MULTISAMPLE_OFFSET / float(height)), -1.0f),
+                                         float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(width), -MO_UV_MULTISAMPLE_OFFSET / float(height)), -1.0f),
+                                         float3(uv + float2(-MO_UV_MULTISAMPLE_OFFSET / float(width),  MO_UV_MULTISAMPLE_OFFSET / float(height)), -1.0f)
+                                        };
+                for (float3 singleSample : multisamples)
+                {
+                    if (moIntersectBVH(node->mesh->bvhUV, MoRay(singleSample, {0,0,1}), intersection, &uvIntersectAlgorithm))
+                    {
+                        float3 barycentricCoordinates = intersection.uvBarycentric(uv);
+                        float3 world = intersection.v0 * barycentricCoordinates[0]
+                                + intersection.v1 * barycentricCoordinates[1]
+                                + intersection.v2 * barycentricCoordinates[2];
+
+                        float3 normal = intersection.n0 * barycentricCoordinates[0]
+                                + intersection.n1 * barycentricCoordinates[1]
+                                + intersection.n2 * barycentricCoordinates[2];
+
+                        float3 lightDirection = normalize(float3(-100,40,40) - world);
+
+                        float diffuseFactor = dot(normal, lightDirection);
+                        if (diffuseFactor > 0.0)
+                        {
+                            if (moIntersectBVH(node->mesh->bvh, MoRay(world + normal * MO_SURFACE_BIAS, lightDirection),
+                                               intersection, &intersectAlgorithm))
+                            {
+                                pTextureSamples[index] = { 0,0,0,255 };
+                            }
+                            else
+                            {
+                                pTextureSamples[index] = {
+                                    std::uint8_t(std::min(255.f, diffuseFactor * 255)),
+                                    std::uint8_t(std::min(255.f, diffuseFactor * 255)),
+                                    std::uint8_t(std::min(255.f, diffuseFactor * 255)),
+                                    255 };
+                            }
+                        }
+                        else
+                        {
+                            pTextureSamples[index] = { 0,0,0,255 };
+                        }
+                        break;
+                    }
+                }
+                if (pTextureSamples[index].a == 0)
+                {
+                    pTextureSamples[index] = { 127,127,127,255 };
+                }
+            }
+        }));
+    }
+    for (auto & thread : threads)
+    {
+        thread.join();
+    }
 }
 
 /*
