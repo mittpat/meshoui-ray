@@ -1,37 +1,46 @@
 #include "assets.h"
 
-#include <linalg.h>
+#include <experimental/filesystem>
 
-#include <functional>
+#include <assimp/Importer.hpp>
+#include <assimp/postprocess.h>
+#include <assimp/scene.h>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
 #define MO_SAVE_TO_FILE
 
+namespace std { namespace filesystem = experimental::filesystem; }
 using namespace linalg;
 using namespace linalg::aliases;
 
 int main(int, char**)
 {
-    MoMeshList meshes;
-
-    MoLoadAsset("teapot.dae", &meshes);
-
-    for (std::uint32_t i = 0; i < meshes->triangleListCount; ++i)
+    std::string filename = "teapot.dae";
+    if (!filename.empty() && std::filesystem::exists(filename))
     {
-        int2 resolution(1024,1024);
-        std::vector<MoTextureSample> output(resolution[0] * resolution[1], {0,0,0,0});
+        Assimp::Importer importer;
+        const aiScene * scene = importer.ReadFile(filename, aiProcess_Debone | aiProcessPreset_TargetRealtime_Fast);
 
-        MoGenerateLightMap(meshes->pTriangleLists[i], output.data(), resolution[0], resolution[1]);
+        for (std::uint32_t meshIdx = 0; meshIdx < scene->mNumMeshes; ++meshIdx)
+        {
+            MoTriangleList triangleList;
+            MoCreateTriangleList(scene->mMeshes[meshIdx], &triangleList);
 
-#ifdef MO_SAVE_TO_FILE
-        // self shadowing test
-        stbi_write_png((std::string("test_uv_") + std::to_string(i) + ".png").c_str(), resolution[0], resolution[1], 4, output.data(), 4 * resolution[0]);
-#endif
+            int2 resolution(1024,1024);
+            std::vector<MoTextureSample> output(resolution[0] * resolution[1], {0,0,0,0});
+
+            MoGenerateLightMap(triangleList, output.data(), resolution[0], resolution[1]);
+
+    #ifdef MO_SAVE_TO_FILE
+            // self shadowing test
+            stbi_write_png((std::string("test_uv_") + std::to_string(meshIdx) + ".png").c_str(), resolution[0], resolution[1], 4, output.data(), 4 * resolution[0]);
+    #endif
+
+            MoDestroyTriangleList(triangleList);
+        }
     }
-
-    MoUnloadAsset(meshes);
 
     return 0;
 }

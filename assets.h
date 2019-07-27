@@ -2,10 +2,6 @@
 
 #include "intersect.h"
 
-#include <linalg.h>
-
-#include <vector>
-
 struct aiMesh;
 
 typedef struct MoTriangleList_T
@@ -16,20 +12,12 @@ typedef struct MoTriangleList_T
     MoBVH             bvhUV;
 }* MoTriangleList;
 
-typedef struct MoMeshList_T
-{
-    const MoTriangleList* pTriangleLists;
-    std::uint32_t         triangleListCount;
-}* MoMeshList;
-
 void MoCreateTriangleList(const aiMesh* ai_mesh, MoTriangleList *pTriangleList);
 void MoDestroyTriangleList(MoTriangleList triangleList);
-bool MoLoadAsset(const std::string& filename, MoMeshList* pMeshList);
-void MoUnloadAsset(MoMeshList meshList);
 
 struct MoTextureSample
 {
-    uint8_t r, g, b, a;
+    std::uint8_t r, g, b, a;
 };
 
 void MoGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, std::uint32_t width, std::uint32_t height);

@@ -68,36 +68,6 @@ void MoDestroyTriangleList(MoTriangleList triangleList)
     delete triangleList;
 }
 
-bool MoLoadAsset(const std::string& filename, MoMeshList* pMeshList)
-{
-    if (!filename.empty() && std::filesystem::exists(filename))
-    {
-        Assimp::Importer importer;
-        const aiScene * scene = importer.ReadFile(filename, aiProcess_Debone | aiProcessPreset_TargetRealtime_Fast);
-
-        MoMeshList meshList = *pMeshList = new MoMeshList_T();
-        *meshList = {};
-        carray_resize(&meshList->pTriangleLists, &meshList->triangleListCount, scene->mNumMeshes);
-        for (std::uint32_t meshIdx = 0; meshIdx < scene->mNumMeshes; ++meshIdx)
-        {
-            MoTriangleList* triangleList = const_cast<MoTriangleList*>(&meshList->pTriangleLists[meshIdx]);
-            MoCreateTriangleList(scene->mMeshes[meshIdx], triangleList);
-        }
-        return true;
-    }
-    return false;
-}
-
-void MoUnloadAsset(MoMeshList meshList)
-{
-    for (std::uint32_t i = 0; i < meshList->triangleListCount; ++i)
-    {
-        MoDestroyTriangleList(meshList->pTriangleLists[i]);
-    }
-    carray_free(meshList->pTriangleLists, &meshList->triangleListCount);
-    delete meshList;
-}
-
 void MoGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, std::uint32_t width, std::uint32_t height)
 {
 #define MO_UV_MULTISAMPLE_OFFSET 1.0f
