@@ -6,10 +6,12 @@
 
 #include <vector>
 
+struct aiMesh;
+
 typedef struct MoTriangleList_T
 {
     const MoTriangle* pTriangles;
-    uint32_t          triangleCount;
+    std::uint32_t     triangleCount;
     MoBVH             bvh;
     MoBVH             bvhUV;
 }* MoTriangleList;
@@ -17,30 +19,20 @@ typedef struct MoTriangleList_T
 typedef struct MoMeshList_T
 {
     const MoTriangleList* pTriangleLists;
-    uint32_t              triangleListCount;
+    std::uint32_t         triangleListCount;
 }* MoMeshList;
 
-typedef struct MoNode_T* MoNode;
-typedef struct MoNode_T
-{
-    std::string               name;
-    linalg::aliases::float4x4 model;
-    MoTriangleList            mesh;
-    const MoNode*             pChildren;
-    uint32_t                  childCount;
-}* MoNode;
-
-bool MoLoadAsset(const std::string& filename, MoNode* pRootNode, MoMeshList* pMeshList);
-
-void MoDestroyNode(MoNode node);
-void MoUnloadAsset(MoNode rootNode, MoMeshList meshList);
+void MoCreateTriangleList(const aiMesh* ai_mesh, MoTriangleList *pTriangleList);
+void MoDestroyTriangleList(MoTriangleList triangleList);
+bool MoLoadAsset(const std::string& filename, MoMeshList* pMeshList);
+void MoUnloadAsset(MoMeshList meshList);
 
 struct MoTextureSample
 {
     uint8_t r, g, b, a;
 };
 
-void MoGenerateLightMap(MoNode node, MoTextureSample* pTextureSamples, std::uint32_t width, std::uint32_t height);
+void MoGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, std::uint32_t width, std::uint32_t height);
 
 /*
 ------------------------------------------------------------------------------

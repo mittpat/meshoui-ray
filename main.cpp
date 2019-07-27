@@ -14,35 +14,24 @@ using namespace linalg::aliases;
 
 int main(int, char**)
 {
-    MoNode root;
     MoMeshList meshes;
 
-    MoLoadAsset("teapot.dae", &root, &meshes);
+    MoLoadAsset("teapot.dae", &meshes);
 
-    int total = 0;
-    std::function<void(MoNode, const float4x4 &)> draw = [&](MoNode node, const float4x4 & model)
+    for (std::uint32_t i = 0; i < meshes->triangleListCount; ++i)
     {
-        if (node->mesh != nullptr)
-        {
-            int2 resolution(1024,1024);
-            std::vector<MoTextureSample> output(resolution[0] * resolution[1], {0,0,0,0});
+        int2 resolution(1024,1024);
+        std::vector<MoTextureSample> output(resolution[0] * resolution[1], {0,0,0,0});
 
-            MoGenerateLightMap(node, output.data(), resolution[0], resolution[1]);
+        MoGenerateLightMap(meshes->pTriangleLists[i], output.data(), resolution[0], resolution[1]);
 
 #ifdef MO_SAVE_TO_FILE
-            // self shadowing test
-            stbi_write_png((std::string("test_uv_") + std::to_string(total) + ".png").c_str(), resolution[0], resolution[1], 4, output.data(), 4 * resolution[0]);
+        // self shadowing test
+        stbi_write_png((std::string("test_uv_") + std::to_string(i) + ".png").c_str(), resolution[0], resolution[1], 4, output.data(), 4 * resolution[0]);
 #endif
-        }
-        for (std::uint32_t i = 0; i < node->childCount; ++i)
-        {
-            MoNode child = node->pChildren[i];
-            draw(child, mul(model, child->model));
-        }
-    };
-    draw(root, root->model);
+    }
 
-    MoUnloadAsset(root, meshes);
+    MoUnloadAsset(meshes);
 
     return 0;
 }

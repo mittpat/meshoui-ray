@@ -14,28 +14,61 @@ namespace std { namespace filesystem = experimental::filesystem; }
 using namespace linalg;
 using namespace linalg::aliases;
 
-void parseNodes(const aiScene * ai_scene, aiNode * ai_node, MoNode node, MoMeshList meshes)
+void MoCreateTriangleList(const aiMesh * ai_mesh, MoTriangleList *pTriangleList)
 {
-    carray_resize(&node->pChildren, &node->childCount, ai_node->mNumMeshes + ai_node->mNumChildren);
-    for (std::uint32_t i = 0; i < ai_node->mNumMeshes; ++i)
+    MoTriangleList triangleList = *pTriangleList = new MoTriangleList_T();
+    *triangleList = {};
+
+    carray_resize(&triangleList->pTriangles, &triangleList->triangleCount, ai_mesh->mNumFaces);
+    for (std::uint32_t faceIdx = 0; faceIdx < ai_mesh->mNumFaces; ++faceIdx)
     {
-        MoNode child = const_cast<MoNode&>(node->pChildren[i]) = new MoNode_T();
-        *child = {};
-        child->name = ai_scene->mMeshes[ai_node->mMeshes[i]]->mName.C_Str();
-        child->model = identity;
-        child->mesh = meshes->pTriangleLists[ai_node->mMeshes[i]];
+        const auto* face = &ai_mesh->mFaces[faceIdx];
+        switch (face->mNumIndices)
+        {
+        case 3:
+        {
+            MoTriangle& triangle = const_cast<MoTriangle&>(triangleList->pTriangles[faceIdx]);
+            triangle.v0 = float3((float*)&ai_mesh->mVertices[face->mIndices[0]]);
+            triangle.v1 = float3((float*)&ai_mesh->mVertices[face->mIndices[1]]);
+            triangle.v2 = float3((float*)&ai_mesh->mVertices[face->mIndices[2]]);
+            if (ai_mesh->HasTextureCoords(0))
+            {
+                triangle.uv0 = float2((float*)&ai_mesh->mTextureCoords[0][face->mIndices[0]]);
+                triangle.uv1 = float2((float*)&ai_mesh->mTextureCoords[0][face->mIndices[1]]);
+                triangle.uv2 = float2((float*)&ai_mesh->mTextureCoords[0][face->mIndices[2]]);
+            }
+            triangle.n0 = float3((float*)&ai_mesh->mNormals[face->mIndices[0]]);
+            triangle.n1 = float3((float*)&ai_mesh->mNormals[face->mIndices[1]]);
+            triangle.n2 = float3((float*)&ai_mesh->mNormals[face->mIndices[2]]);
+            break;
+        }
+        default:
+            printf("parseAiMesh(): Mesh %s, Face %d has %d vertices.\n", ai_mesh->mName.C_Str(), faceIdx, face->mNumIndices);
+            break;
+        }
     }
-    for (std::uint32_t i = 0; i < ai_node->mNumChildren; ++i)
-    {
-        MoNode child = const_cast<MoNode&>(node->pChildren[ai_node->mNumMeshes + i]) = new MoNode_T();
-        *child = {};
-        child->name = ai_node->mChildren[i]->mName.C_Str();
-        child->model = transpose(float4x4((float*)&ai_node->mChildren[i]->mTransformation));
-        parseNodes(ai_scene, ai_node->mChildren[i], child, meshes);
-    }
+
+    MoCreateBVHAlgorithm algo;
+    // 3d space
+    algo.getBoundingBox = [](const MoTriangle& object) -> MoBBox { return object.getBoundingBox(); };
+    algo.getCentroid = [](const MoTriangle& object) -> float3 { return object.getCentroid(); };
+    moCreateBVH(triangleList->pTriangles, triangleList->triangleCount, &triangleList->bvh, &algo);
+
+    // uv space
+    algo.getBoundingBox = [](const MoTriangle& object) -> MoBBox { return object.getUVBoundingBox(); };
+    algo.getCentroid = [](const MoTriangle& object) -> float3 { return object.getUVCentroid(); };
+    moCreateBVH(triangleList->pTriangles, triangleList->triangleCount, &triangleList->bvhUV, &algo);
 }
 
-bool MoLoadAsset(const std::string& filename, MoNode* pRootNode, MoMeshList* pMeshList)
+void MoDestroyTriangleList(MoTriangleList triangleList)
+{
+    moDestroyBVH(triangleList->bvh);
+    moDestroyBVH(triangleList->bvhUV);
+    carray_free(triangleList->pTriangles, &triangleList->triangleCount);
+    delete triangleList;
+}
+
+bool MoLoadAsset(const std::string& filename, MoMeshList* pMeshList)
 {
     if (!filename.empty() && std::filesystem::exists(filename))
     {
@@ -47,90 +80,25 @@ bool MoLoadAsset(const std::string& filename, MoNode* pRootNode, MoMeshList* pMe
         carray_resize(&meshList->pTriangleLists, &meshList->triangleListCount, scene->mNumMeshes);
         for (std::uint32_t meshIdx = 0; meshIdx < scene->mNumMeshes; ++meshIdx)
         {
-            MoTriangleList triangleList = const_cast<MoTriangleList&>(meshList->pTriangleLists[meshIdx]) = new MoTriangleList_T();
-            *triangleList = {};
-
-            const auto* mesh = scene->mMeshes[meshIdx];
-            carray_resize(&triangleList->pTriangles, &triangleList->triangleCount, mesh->mNumFaces);
-            for (std::uint32_t faceIdx = 0; faceIdx < mesh->mNumFaces; ++faceIdx)
-            {
-                const auto* face = &mesh->mFaces[faceIdx];
-                switch (face->mNumIndices)
-                {
-                case 3:
-                {
-                    MoTriangle& triangle = const_cast<MoTriangle&>(triangleList->pTriangles[faceIdx]);
-                    triangle.v0 = float3((float*)&mesh->mVertices[face->mIndices[0]]);
-                    triangle.v1 = float3((float*)&mesh->mVertices[face->mIndices[1]]);
-                    triangle.v2 = float3((float*)&mesh->mVertices[face->mIndices[2]]);
-                    if (mesh->HasTextureCoords(0))
-                    {
-                        triangle.uv0 = float2((float*)&mesh->mTextureCoords[0][face->mIndices[0]]);
-                        triangle.uv1 = float2((float*)&mesh->mTextureCoords[0][face->mIndices[1]]);
-                        triangle.uv2 = float2((float*)&mesh->mTextureCoords[0][face->mIndices[2]]);
-                    }
-                    triangle.n0 = float3((float*)&mesh->mNormals[face->mIndices[0]]);
-                    triangle.n1 = float3((float*)&mesh->mNormals[face->mIndices[1]]);
-                    triangle.n2 = float3((float*)&mesh->mNormals[face->mIndices[2]]);
-                    break;
-                }
-                default:
-                    printf("MoLoadAsset(): File %s, Mesh %s, Face %d has %d vertices.\n", filename.c_str(), mesh->mName.C_Str(), faceIdx, face->mNumIndices);
-                    break;
-                }
-            }
-
-            MoCreateBVHAlgorithm algo;
-            // 3d space
-            algo.getBoundingBox = [](const MoTriangle& object) -> MoBBox { return object.getBoundingBox(); };
-            algo.getCentroid = [](const MoTriangle& object) -> float3 { return object.getCentroid(); };
-            moCreateBVH(triangleList->pTriangles, triangleList->triangleCount, &triangleList->bvh, &algo);
-
-            // uv space
-            algo.getBoundingBox = [](const MoTriangle& object) -> MoBBox { return object.getUVBoundingBox(); };
-            algo.getCentroid = [](const MoTriangle& object) -> float3 { return object.getUVCentroid(); };
-            moCreateBVH(triangleList->pTriangles, triangleList->triangleCount, &triangleList->bvhUV, &algo);
+            MoTriangleList* triangleList = const_cast<MoTriangleList*>(&meshList->pTriangleLists[meshIdx]);
+            MoCreateTriangleList(scene->mMeshes[meshIdx], triangleList);
         }
-
-        MoNode rootNode = *pRootNode = new MoNode_T();
-        *rootNode = {};
-        rootNode->name = filename + ":" + scene->mRootNode->mName.C_Str();
-        rootNode->model = transpose(float4x4((float*)&scene->mRootNode->mTransformation));
-        parseNodes(scene, scene->mRootNode, rootNode, meshList);
-
         return true;
     }
-
     return false;
 }
 
-void MoDestroyNode(MoNode node)
-{
-    for (std::uint32_t i = 0; i < node->childCount; ++i)
-    {
-        MoDestroyNode(node->pChildren[i]);
-    }
-    carray_free(node->pChildren, &node->childCount);
-    delete node;
-}
-
-void MoUnloadAsset(MoNode rootNode, MoMeshList meshList)
+void MoUnloadAsset(MoMeshList meshList)
 {
     for (std::uint32_t i = 0; i < meshList->triangleListCount; ++i)
     {
-        MoTriangleList triangleList = meshList->pTriangleLists[i];
-        moDestroyBVH(triangleList->bvh);
-        moDestroyBVH(triangleList->bvhUV);
-        carray_free(triangleList->pTriangles, &triangleList->triangleCount);
-        delete triangleList;
+        MoDestroyTriangleList(meshList->pTriangleLists[i]);
     }
     carray_free(meshList->pTriangleLists, &meshList->triangleListCount);
     delete meshList;
-
-    MoDestroyNode(rootNode);
 }
 
-void MoGenerateLightMap(MoNode node, MoTextureSample* pTextureSamples, std::uint32_t width, std::uint32_t height)
+void MoGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, std::uint32_t width, std::uint32_t height)
 {
 #define MO_UV_MULTISAMPLE_OFFSET 1.0f
 #define MO_SURFACE_BIAS 0.01f
@@ -188,7 +156,7 @@ void MoGenerateLightMap(MoNode node, MoTextureSample* pTextureSamples, std::uint
                                         };
                 for (float3 singleSample : multisamples)
                 {
-                    if (moIntersectBVH(node->mesh->bvhUV, MoRay(singleSample, {0,0,1}), intersection, &uvIntersectAlgorithm))
+                    if (moIntersectBVH(mesh->bvhUV, MoRay(singleSample, {0,0,1}), intersection, &uvIntersectAlgorithm))
                     {
                         float3 barycentricCoordinates = intersection.uvBarycentric(uv);
                         float3 world = intersection.v0 * barycentricCoordinates[0]
@@ -204,7 +172,7 @@ void MoGenerateLightMap(MoNode node, MoTextureSample* pTextureSamples, std::uint
                         float diffuseFactor = dot(normal, lightDirection);
                         if (diffuseFactor > 0.0)
                         {
-                            if (moIntersectBVH(node->mesh->bvh, MoRay(world + normal * MO_SURFACE_BIAS, lightDirection),
+                            if (moIntersectBVH(mesh->bvh, MoRay(world + normal * MO_SURFACE_BIAS, lightDirection),
                                                intersection, &intersectAlgorithm))
                             {
                                 pTextureSamples[index] = { 0,0,0,255 };
