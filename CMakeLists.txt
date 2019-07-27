@@ -7,9 +7,7 @@ add_subdirectory(3rdparty)
 
 add_executable(meshouiray
     main.cpp
-    carray.h
-    assets.h assets.cpp
-    intersect.h intersect.cpp)
+    lightmap.h lightmap.cpp)
 
 if(NOT MSVC)
     target_link_libraries(meshouiray assimp linalg stb stdc++fs Threads::Threads)

@@ -2,8 +2,6 @@
 
 #include <linalg.h>
 
-#include <vector>
-
 class MoRay
 {
 public:
@@ -105,6 +103,26 @@ struct MoIntersectBVHAlgorithm
 };
 
 bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoTriangle &intersection, MoIntersectBVHAlgorithm* pAlgorithm);
+
+struct aiMesh;
+
+typedef struct MoTriangleList_T
+{
+    const MoTriangle* pTriangles;
+    std::uint32_t     triangleCount;
+    MoBVH             bvh;
+    MoBVH             bvhUV;
+}* MoTriangleList;
+
+void moCreateTriangleList(const aiMesh* ai_mesh, MoTriangleList *pTriangleList);
+void moDestroyTriangleList(MoTriangleList triangleList);
+
+struct MoTextureSample
+{
+    std::uint8_t r, g, b, a;
+};
+
+void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, std::uint32_t width, std::uint32_t height);
 
 /*
 ------------------------------------------------------------------------------

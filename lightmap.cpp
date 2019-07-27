@@ -1,21 +1,93 @@
-#include "intersect.h"
-#include "carray.h"
+#include "lightmap.h"
+
+#include <assimp/mesh.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <deque>
 #include <limits>
-
-namespace
-{
-    enum : std::uint32_t
-    {
-        Node_Untouched    = 0xffffffff,
-        Node_TouchedTwice = 0xfffffffd,
-        Node_Root         = 0xfffffffc,
-    };
-}
+#include <thread>
+#include <vector>
 
 using namespace linalg;
 using namespace linalg::aliases;
+
+std::uint32_t carray_nextPowerOfTwo(std::uint32_t v)
+{
+    v--;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    v++;
+    return v;
+}
+
+template<typename T>
+void carray_resize(const T** array, std::uint32_t* currentSize, std::uint32_t newSize)
+{
+    T** local = const_cast<T**>(array);
+
+    std::uint32_t previous = carray_nextPowerOfTwo(*currentSize);
+    std::uint32_t next = carray_nextPowerOfTwo(newSize);
+    if (previous != next)
+    {
+        *local = reinterpret_cast<T*>(realloc(*local, next * sizeof(T)));
+    }
+    *currentSize = newSize;
+}
+
+template<typename T>
+inline void carray_resize(T** array, std::uint32_t* currentSize, std::uint32_t newSize)
+{
+    carray_resize(const_cast<const T**>(array), currentSize, newSize);
+}
+
+template<typename T>
+void carray_push_back(const T** array, std::uint32_t* size, T value)
+{
+    T** local = const_cast<T**>(array);
+
+    std::uint32_t previous = carray_nextPowerOfTwo(*size);
+    std::uint32_t next = carray_nextPowerOfTwo(++(*size));
+    if (previous != next)
+    {
+        *local = reinterpret_cast<T*>(realloc(*local, next * sizeof(T)));
+    }
+    (*local)[*size-1] = value;
+}
+
+template<typename T>
+inline void carray_push_back(T** array, std::uint32_t* size, T value)
+{
+    carray_push_back(const_cast<const T**>(array), size, value);
+}
+
+template<typename T>
+void carray_copy(const T* source, const T* destination, std::uint32_t count)
+{
+    T* lsource = const_cast<T*>(source);
+    T* ldestination = const_cast<T*>(destination);
+
+    memcpy(ldestination, lsource, count * sizeof(T));
+}
+
+template<typename T>
+inline void carray_copy(T* source, T* destination, std::uint32_t count)
+{
+    carray_push_back(const_cast<const T*>(source), const_cast<const T*>(destination), count);
+}
+
+template<typename T>
+inline void carray_free(const T* array, std::uint32_t* size)
+{
+    T* local = const_cast<T*>(array);
+
+    free(local);
+    *size = 0;
+}
 
 MoBBox::MoBBox(const float3& _min, const float3& _max)
     : min(_min)
@@ -182,6 +254,13 @@ bool moTexcoordInTriangleUV(float2 tex, const MoTriangle& triangle)
 
 void moCreateBVH(const MoTriangle *pObjects, uint32_t objectCount, MoBVH* pBVH, MoCreateBVHAlgorithm *pAlgorithm)
 {
+    enum : std::uint32_t
+    {
+        Node_Untouched    = 0xffffffff,
+        Node_TouchedTwice = 0xfffffffd,
+        Node_Root         = 0xfffffffc,
+    };
+
     MoBVH bvh = *pBVH = new MoBVH_T();
     *bvh = {};
     carray_resize(&bvh->pObjects, &bvh->objectCount, objectCount);
@@ -389,6 +468,168 @@ bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoTriangle& intersection, MoInt
     }
 
     return intersectionDistance < std::numeric_limits<float>::max();
+}
+
+void moCreateTriangleList(const aiMesh * ai_mesh, MoTriangleList *pTriangleList)
+{
+    MoTriangleList triangleList = *pTriangleList = new MoTriangleList_T();
+    *triangleList = {};
+
+    carray_resize(&triangleList->pTriangles, &triangleList->triangleCount, ai_mesh->mNumFaces);
+    for (std::uint32_t faceIdx = 0; faceIdx < ai_mesh->mNumFaces; ++faceIdx)
+    {
+        const auto* face = &ai_mesh->mFaces[faceIdx];
+        switch (face->mNumIndices)
+        {
+        case 3:
+        {
+            MoTriangle& triangle = const_cast<MoTriangle&>(triangleList->pTriangles[faceIdx]);
+            triangle.v0 = float3((float*)&ai_mesh->mVertices[face->mIndices[0]]);
+            triangle.v1 = float3((float*)&ai_mesh->mVertices[face->mIndices[1]]);
+            triangle.v2 = float3((float*)&ai_mesh->mVertices[face->mIndices[2]]);
+            if (ai_mesh->HasTextureCoords(0))
+            {
+                triangle.uv0 = float2((float*)&ai_mesh->mTextureCoords[0][face->mIndices[0]]);
+                triangle.uv1 = float2((float*)&ai_mesh->mTextureCoords[0][face->mIndices[1]]);
+                triangle.uv2 = float2((float*)&ai_mesh->mTextureCoords[0][face->mIndices[2]]);
+            }
+            triangle.n0 = float3((float*)&ai_mesh->mNormals[face->mIndices[0]]);
+            triangle.n1 = float3((float*)&ai_mesh->mNormals[face->mIndices[1]]);
+            triangle.n2 = float3((float*)&ai_mesh->mNormals[face->mIndices[2]]);
+            break;
+        }
+        default:
+            printf("parseAiMesh(): Mesh %s, Face %d has %d vertices.\n", ai_mesh->mName.C_Str(), faceIdx, face->mNumIndices);
+            break;
+        }
+    }
+
+    MoCreateBVHAlgorithm algo;
+    // 3d space
+    algo.getBoundingBox = [](const MoTriangle& object) -> MoBBox { return object.getBoundingBox(); };
+    algo.getCentroid = [](const MoTriangle& object) -> float3 { return object.getCentroid(); };
+    moCreateBVH(triangleList->pTriangles, triangleList->triangleCount, &triangleList->bvh, &algo);
+
+    // uv space
+    algo.getBoundingBox = [](const MoTriangle& object) -> MoBBox { return object.getUVBoundingBox(); };
+    algo.getCentroid = [](const MoTriangle& object) -> float3 { return object.getUVCentroid(); };
+    moCreateBVH(triangleList->pTriangles, triangleList->triangleCount, &triangleList->bvhUV, &algo);
+}
+
+void moDestroyTriangleList(MoTriangleList triangleList)
+{
+    moDestroyBVH(triangleList->bvh);
+    moDestroyBVH(triangleList->bvhUV);
+    carray_free(triangleList->pTriangles, &triangleList->triangleCount);
+    delete triangleList;
+}
+
+void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, std::uint32_t width, std::uint32_t height)
+{
+#define MO_UV_MULTISAMPLE_OFFSET 1.0f
+#define MO_SURFACE_BIAS 0.01f
+    MoIntersectBVHAlgorithm intersectAlgorithm;
+    intersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object) -> float
+    {
+        float3 intersectionPoint;
+        if (moRayTriangleIntersect(ray, object, intersectionPoint))
+        {
+            return 0.0;
+        }
+        return std::numeric_limits<float>::max();
+    };
+    intersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float* t_near, float* t_far) -> bool
+    {
+        return bbox.intersect(ray, t_near, t_far);
+    };
+
+    MoIntersectBVHAlgorithm uvIntersectAlgorithm;
+    uvIntersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object) -> float
+    {
+        if (moTexcoordInTriangleUV(ray.origin.xy(), object))
+        {
+            return 0.0;
+        }
+        return std::numeric_limits<float>::max();
+    };
+    uvIntersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float* t_near, float* t_far) -> bool
+    {
+        return bbox.intersect(ray, t_near, t_far);
+    };
+
+    std::deque<std::thread> threads;
+    for (int row = 0; row < height; ++row)
+    {
+        if (threads.size() > std::thread::hardware_concurrency())
+        {
+            threads.front().join();
+            threads.pop_front();
+        }
+        threads.emplace_back(std::thread([&, row]()
+        {
+            for (int column = 0; column < width; ++column)
+            {
+                float2 uv((column + 0.5) / float(width), (row + 0.5) / float(height));
+                MoTriangle intersection;
+
+                std::uint32_t index = (height - row - 1) * width + column;
+
+                float3 multisamples[] = {float3(uv, -1.0f),
+                                         float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(width),  MO_UV_MULTISAMPLE_OFFSET / float(height)), -1.0f),
+                                         float3(uv + float2(-MO_UV_MULTISAMPLE_OFFSET / float(width), -MO_UV_MULTISAMPLE_OFFSET / float(height)), -1.0f),
+                                         float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(width), -MO_UV_MULTISAMPLE_OFFSET / float(height)), -1.0f),
+                                         float3(uv + float2(-MO_UV_MULTISAMPLE_OFFSET / float(width),  MO_UV_MULTISAMPLE_OFFSET / float(height)), -1.0f)
+                                        };
+                for (float3 singleSample : multisamples)
+                {
+                    if (moIntersectBVH(mesh->bvhUV, MoRay(singleSample, {0,0,1}), intersection, &uvIntersectAlgorithm))
+                    {
+                        float3 barycentricCoordinates = intersection.uvBarycentric(uv);
+                        float3 world = intersection.v0 * barycentricCoordinates[0]
+                                + intersection.v1 * barycentricCoordinates[1]
+                                + intersection.v2 * barycentricCoordinates[2];
+
+                        float3 normal = intersection.n0 * barycentricCoordinates[0]
+                                + intersection.n1 * barycentricCoordinates[1]
+                                + intersection.n2 * barycentricCoordinates[2];
+
+                        float3 lightDirection = normalize(float3(-100,40,40) - world);
+
+                        float diffuseFactor = dot(normal, lightDirection);
+                        if (diffuseFactor > 0.0)
+                        {
+                            if (moIntersectBVH(mesh->bvh, MoRay(world + normal * MO_SURFACE_BIAS, lightDirection),
+                                               intersection, &intersectAlgorithm))
+                            {
+                                pTextureSamples[index] = { 0,0,0,255 };
+                            }
+                            else
+                            {
+                                pTextureSamples[index] = {
+                                    std::uint8_t(std::min(255.f, diffuseFactor * 255)),
+                                    std::uint8_t(std::min(255.f, diffuseFactor * 255)),
+                                    std::uint8_t(std::min(255.f, diffuseFactor * 255)),
+                                    255 };
+                            }
+                        }
+                        else
+                        {
+                            pTextureSamples[index] = { 0,0,0,255 };
+                        }
+                        break;
+                    }
+                }
+                if (pTextureSamples[index].a == 0)
+                {
+                    pTextureSamples[index] = { 127,127,127,255 };
+                }
+            }
+        }));
+    }
+    for (auto & thread : threads)
+    {
+        thread.join();
+    }
 }
 
 /*

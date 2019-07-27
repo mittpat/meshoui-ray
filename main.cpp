@@ -1,4 +1,4 @@
-#include "assets.h"
+#include "lightmap.h"
 
 #include <experimental/filesystem>
 
@@ -26,19 +26,18 @@ int main(int, char**)
         for (std::uint32_t meshIdx = 0; meshIdx < scene->mNumMeshes; ++meshIdx)
         {
             MoTriangleList triangleList;
-            MoCreateTriangleList(scene->mMeshes[meshIdx], &triangleList);
+            moCreateTriangleList(scene->mMeshes[meshIdx], &triangleList);
 
             int2 resolution(1024,1024);
             std::vector<MoTextureSample> output(resolution[0] * resolution[1], {0,0,0,0});
 
-            MoGenerateLightMap(triangleList, output.data(), resolution[0], resolution[1]);
+            moGenerateLightMap(triangleList, output.data(), resolution[0], resolution[1]);
+            moDestroyTriangleList(triangleList);
 
     #ifdef MO_SAVE_TO_FILE
             // self shadowing test
             stbi_write_png((std::string("test_uv_") + std::to_string(meshIdx) + ".png").c_str(), resolution[0], resolution[1], 4, output.data(), 4 * resolution[0]);
     #endif
-
-            MoDestroyTriangleList(triangleList);
         }
     }
 
