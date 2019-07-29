@@ -17,7 +17,7 @@ using namespace linalg::aliases;
 
 int main(int, char**)
 {
-    std::string filename = "teapot.dae";
+    std::string filename = "alley.dae";
     if (!filename.empty() && std::filesystem::exists(filename))
     {
         Assimp::Importer importer;
@@ -28,15 +28,22 @@ int main(int, char**)
             MoTriangleList triangleList;
             moCreateTriangleList(scene->mMeshes[meshIdx], &triangleList);
 
-            int2 resolution(1024,1024);
-            std::vector<MoTextureSample> output(resolution[0] * resolution[1], {0,0,0,0});
-
-            moGenerateLightMap(triangleList, output.data(), resolution[0], resolution[1]);
+            MoLightmapCreateInfo info = {};
+            info.sunThetaPhi = {moDegreesToRadians(45.f), moDegreesToRadians(135.f)};
+            info.sunSpread = moDegreesToRadians(5.f);
+            info.enableDiffuse = 1;
+            info.sampleCount = 1024;
+            info.sampleContribution = 1.f;
+            info.defaultColor = {127,127,127,255};
+            info.width = 512;
+            info.height = 512;
+            std::vector<MoTextureSample> output(info.width * info.height, {0,0,0,0});
+            moGenerateLightMap(triangleList, output.data(), &info);
             moDestroyTriangleList(triangleList);
 
     #ifdef MO_SAVE_TO_FILE
             // self shadowing test
-            stbi_write_png((std::string("test_uv_") + std::to_string(meshIdx) + ".png").c_str(), resolution[0], resolution[1], 4, output.data(), 4 * resolution[0]);
+            stbi_write_png((std::string("test_uv_") + std::to_string(meshIdx) + ".png").c_str(), info.width, info.height, 4, output.data(), 4 * info.width);
     #endif
         }
     }

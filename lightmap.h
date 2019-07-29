@@ -117,12 +117,26 @@ typedef struct MoTriangleList_T
 void moCreateTriangleList(const aiMesh* ai_mesh, MoTriangleList *pTriangleList);
 void moDestroyTriangleList(MoTriangleList triangleList);
 
-struct MoTextureSample
-{
-    std::uint8_t r, g, b, a;
+// theta is pi/2 - elevation
+// phi is akin to azimuth
+linalg::aliases::float3 moSphericalToCartesian(float theta, float phi);
+
+#define MoPI (355.f/113)
+float moDegreesToRadians(float angle);
+
+struct MoLightmapCreateInfo {
+    linalg::aliases::float2 sunThetaPhi;   //angles (2)
+    float                   sunSpread;     //angle
+    std::uint32_t           enableDiffuse; // enable phong-like diffuse
+    std::uint32_t           sampleCount;
+    float                   sampleContribution;
+    linalg::aliases::byte4  defaultColor;
+    std::uint32_t           width;
+    std::uint32_t           height;
 };
 
-void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, std::uint32_t width, std::uint32_t height);
+typedef linalg::aliases::byte4 MoTextureSample; //rgba
+void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, const MoLightmapCreateInfo* pCreateInfo);
 
 /*
 ------------------------------------------------------------------------------
