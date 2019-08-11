@@ -667,6 +667,29 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
                                 value += contribution;
                             }
                         }
+
+                        for (std::uint32_t i = 0; i < pCreateInfo->directionalLightSourceCount; ++i)
+                        {
+                            float3 rayCast = pCreateInfo->pDirectionalLightSources[i].xyz();
+                            float diffuseFactor = dot(surfaceNormal, rayCast);
+                            if (diffuseFactor > 0.0)
+                            {
+                                float contribution = 0.f;
+
+                                MoIntersectResult intersection = {};
+                                if (moIntersectBVH(mesh->bvh, MoRay(world + surfaceNormal * MO_SURFACE_BIAS, rayCast), intersection, &intersectAlgorithm))
+                                {
+                                    // we're occluded
+                                }
+                                else
+                                {
+                                    contribution = diffuseFactor * pCreateInfo->pDirectionalLightSources[i].w;
+                                }
+
+                                value += contribution;
+                            }
+                        }
+
                         pTextureSamples[index].x = pTextureSamples[index].y = pTextureSamples[index].z = std::uint8_t(std::min(255.f, value * 255));
                         pTextureSamples[index].w = pCreateInfo->nullColor.w;
                         break;

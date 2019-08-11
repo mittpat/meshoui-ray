@@ -141,6 +141,7 @@ struct MoLightmapCreateInfo {
     float                    ambiantLightingContribution;
     float                    ambiantOcclusionDistance;
     // directional lighting
+    std::uint32_t            directionalLightingSampleCount;
     linalg::aliases::float4* pDirectionalLightSources;
     std::uint32_t            directionalLightSourceCount;
     // point lighting

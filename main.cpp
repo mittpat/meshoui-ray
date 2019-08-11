@@ -17,7 +17,7 @@ using namespace linalg::aliases;
 
 int main(int, char**)
 {
-    float4 lightSources[1] = {{float4(normalize(float3(1,1,1)),100)}};
+    float4 lightSources[1] = {{float4(normalize(float3(1,1,1)),0.6f)}};
 
     std::string filename = "teapot.dae";
     if (!filename.empty() && std::filesystem::exists(filename))
@@ -36,8 +36,9 @@ int main(int, char**)
             info.height = 512;
             info.enableAmbiantLightingSurfaceDiffusion = 1;
             info.ambiantLightingSampleCount = 512;
-            info.ambiantLightingContribution = 1.f;
+            info.ambiantLightingContribution = 0.4f;
             info.ambiantOcclusionDistance = 1.f;
+            info.directionalLightingSampleCount = 16;
             info.pDirectionalLightSources = lightSources;
             info.directionalLightSourceCount = 1;
             std::vector<MoTextureSample> output(info.width * info.height, {0,0,0,0});
