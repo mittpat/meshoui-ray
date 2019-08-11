@@ -123,13 +123,6 @@ typedef struct MoTriangleList_T
 void moCreateTriangleList(const aiMesh* ai_mesh, MoTriangleList *pTriangleList);
 void moDestroyTriangleList(MoTriangleList triangleList);
 
-// theta is pi/2 - elevation
-// phi is akin to azimuth
-linalg::aliases::float3 moSphericalToCartesian(float theta, float phi);
-
-#define MoPI (355.f/113)
-float moDegreesToRadians(float angle);
-
 struct MoLightmapCreateInfo {
     linalg::aliases::byte4   nullColor;
     std::uint32_t            width;

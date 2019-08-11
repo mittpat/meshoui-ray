@@ -523,21 +523,6 @@ void moDestroyTriangleList(MoTriangleList triangleList)
     delete triangleList;
 }
 
-float3 moSphericalToCartesian(float theta, float phi)
-{
-    // Calculate the cartesian point
-    float3 ray;
-    ray.x = sin(theta) * cos(phi);
-    ray.y = sin(theta) * sin(phi);
-    ray.z = cos(theta);
-    return ray;
-}
-
-float moDegreesToRadians(float angle)
-{
-    return angle * MoPI / 180.0f;
-}
-
 void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, const MoLightmapCreateInfo* pCreateInfo)
 {
     static std::random_device rd{};
