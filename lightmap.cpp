@@ -542,7 +542,8 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
 {
     static std::random_device rd{};
     static std::mt19937 gen{rd()};
-    static float3* sVectorList = nullptr;
+    static float3* sSphericalDirectionVectorList = nullptr;
+    static float3* sSphericalPositionVectorList = nullptr;
     static std::uint32_t sVectorListSize = 0;
 
     if (sVectorListSize < pCreateInfo->ambiantLightingSampleCount)
@@ -551,16 +552,21 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
         std::uniform_real_distribution<float> genY(-1.f, 1.f);
         std::uniform_real_distribution<float> genZ(-1.f, 1.f);
 
-        std::uint32_t at = sVectorListSize;
-        carray_resize(&sVectorList, &sVectorListSize, pCreateInfo->ambiantLightingSampleCount);
-        while (at < sVectorListSize)
+        std::uint32_t temp1 = sVectorListSize;
+        std::uint32_t temp2 = temp1;
+        std::uint32_t sampleCount = std::max(pCreateInfo->ambiantLightingSampleCount, pCreateInfo->directionalLightingSampleCount);
+        carray_resize(&sSphericalDirectionVectorList, &temp1, sampleCount);
+        carray_resize(&sSphericalPositionVectorList, &temp2, sampleCount);
+        for (std::uint32_t at = sVectorListSize; at < sampleCount;)
         {
             float3 vect(genX(gen), genY(gen), genZ(gen));
             if (length2(vect) < 1.f)
             {
-                sVectorList[at++] = normalize(vect);
+                sSphericalPositionVectorList[at] = vect;
+                sSphericalDirectionVectorList[at++] = normalize(vect);
             }
         }
+        sVectorListSize = sampleCount;
     }
 
 #define MO_UV_MULTISAMPLE_OFFSET 1.0f
@@ -634,9 +640,10 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
                         surfaceNormal = normalize(surfaceNormal);
 
                         float value = 0.f;
+                        // ambiant
                         for (std::uint32_t i = 0; i < pCreateInfo->ambiantLightingSampleCount; ++i)
                         {
-                            float3 rayCast = sVectorList[i];
+                            float3 rayCast = sSphericalDirectionVectorList[i];
                             float diffuseFactor = 1.f;
                             float ambiantLightingWhitePoint = 2.f; // fully lit from top hemisphere IS fully lit
                             if (pCreateInfo->enableAmbiantLightingSurfaceDiffusion != 0)
@@ -668,25 +675,32 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
                             }
                         }
 
-                        for (std::uint32_t i = 0; i < pCreateInfo->directionalLightSourceCount; ++i)
+                        // directional
+                        for (std::uint32_t j = 0; j < pCreateInfo->directionalLightSourceCount; ++j)
                         {
-                            float3 rayCast = pCreateInfo->pDirectionalLightSources[i].xyz();
-                            float diffuseFactor = dot(surfaceNormal, rayCast);
-                            if (diffuseFactor > 0.0)
+                            for (std::uint32_t i = 0; i < pCreateInfo->directionalLightingSampleCount; ++i)
                             {
-                                float contribution = 0.f;
-
-                                MoIntersectResult intersection = {};
-                                if (moIntersectBVH(mesh->bvh, MoRay(world + surfaceNormal * MO_SURFACE_BIAS, rayCast), intersection, &intersectAlgorithm))
+                                float relativeSamplingRadius = 0.05f;
+                                float3 rayCast = normalize(pCreateInfo->pDirectionalLightSources[j].xyz() + sSphericalPositionVectorList[i] * relativeSamplingRadius);
+                                float diffuseFactor = dot(surfaceNormal, rayCast);
+                                if (diffuseFactor > 0.0)
                                 {
-                                    // we're occluded
-                                }
-                                else
-                                {
-                                    contribution = diffuseFactor * pCreateInfo->pDirectionalLightSources[i].w;
-                                }
+                                    float contribution = 0.f;
 
-                                value += contribution;
+                                    MoIntersectResult intersection = {};
+                                    if (moIntersectBVH(mesh->bvh, MoRay(world + surfaceNormal * MO_SURFACE_BIAS, rayCast), intersection, &intersectAlgorithm))
+                                    {
+                                        // we're occluded
+                                    }
+                                    else
+                                    {
+                                        contribution = diffuseFactor * pCreateInfo->pDirectionalLightSources[j].w;
+                                        contribution /= pCreateInfo->directionalLightingSampleCount;
+
+                                    }
+
+                                    value += contribution;
+                                }
                             }
                         }
 

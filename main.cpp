@@ -35,10 +35,10 @@ int main(int, char**)
             info.width = 512;
             info.height = 512;
             info.enableAmbiantLightingSurfaceDiffusion = 1;
-            info.ambiantLightingSampleCount = 512;
+            info.ambiantLightingSampleCount = 256;
             info.ambiantLightingContribution = 0.4f;
             info.ambiantOcclusionDistance = 1.f;
-            info.directionalLightingSampleCount = 16;
+            info.directionalLightingSampleCount = 64;
             info.pDirectionalLightSources = lightSources;
             info.directionalLightSourceCount = 1;
             std::vector<MoTextureSample> output(info.width * info.height, {0,0,0,0});
