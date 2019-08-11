@@ -102,7 +102,13 @@ struct MoIntersectBVHAlgorithm
     bool (*intersectBBox)(const MoRay& ray, const MoBBox&, float*, float*);
 };
 
-bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoTriangle &intersection, MoIntersectBVHAlgorithm* pAlgorithm);
+struct MoIntersectResult
+{
+    const MoTriangle* pTriangle;
+    float distance;
+};
+
+bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoIntersectResult& intersection, MoIntersectBVHAlgorithm* pAlgorithm);
 
 struct aiMesh;
 
@@ -125,14 +131,21 @@ linalg::aliases::float3 moSphericalToCartesian(float theta, float phi);
 float moDegreesToRadians(float angle);
 
 struct MoLightmapCreateInfo {
-    linalg::aliases::float2 sunThetaPhi;   //angles (2)
-    float                   sunSpread;     //angle
-    std::uint32_t           enableDiffuse; // enable phong-like diffuse
-    std::uint32_t           sampleCount;
-    float                   sampleContribution;
-    linalg::aliases::byte4  defaultColor;
-    std::uint32_t           width;
-    std::uint32_t           height;
+    linalg::aliases::byte4   nullColor;
+    std::uint32_t            width;
+    std::uint32_t            height;
+    // phong-like diffuse
+    std::uint32_t            enableAmbiantLightingSurfaceDiffusion;
+    // ambiant lighting
+    std::uint32_t            ambiantLightingSampleCount;
+    float                    ambiantLightingContribution;
+    float                    ambiantOcclusionDistance;
+    // directional lighting
+    linalg::aliases::float4* pDirectionalLightSources;
+    std::uint32_t            directionalLightSourceCount;
+    // point lighting
+    linalg::aliases::float4* pPointLightSources;
+    std::uint32_t            pointLightSourceCount;
 };
 
 typedef linalg::aliases::byte4 MoTextureSample; //rgba
