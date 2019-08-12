@@ -126,26 +126,35 @@ void moDestroyTriangleList(MoTriangleList triangleList);
 struct MoDirectionalLight
 {
     linalg::aliases::float3 direction;
-    float                   contribution;
+    float                   power;
     float                   angularSize;
+};
+
+struct MoPointLight
+{
+    linalg::aliases::float3 position;
+    float                   power;
+    float                   size;
+    float                   constantAttenuation;
+    float                   linearAttenuation;
+    float                   quadraticAttenuation;
 };
 
 struct MoLightmapCreateInfo {
     linalg::aliases::byte4   nullColor;
     std::uint32_t            width;
     std::uint32_t            height;
-    // phong-like diffuse
-    std::uint32_t            enableAmbiantLightingSurfaceDiffusion;
     // ambiant lighting
     std::uint32_t            ambiantLightingSampleCount;
-    float                    ambiantLightingContribution;
+    float                    ambiantLightingPower;
     float                    ambiantOcclusionDistance;
     // directional lighting
     std::uint32_t            directionalLightingSampleCount;
     MoDirectionalLight*      pDirectionalLightSources;
     std::uint32_t            directionalLightSourceCount;
     // point lighting
-    linalg::aliases::float4* pPointLightSources;
+    std::uint32_t            pointLightingSampleCount;
+    MoPointLight*            pPointLightSources;
     std::uint32_t            pointLightSourceCount;
 };
 

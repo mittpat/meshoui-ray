@@ -523,15 +523,50 @@ void moDestroyTriangleList(MoTriangleList triangleList)
     delete triangleList;
 }
 
+float moGather(MoBVH bvh, MoIntersectBVHAlgorithm* pAlgorithm, const float3& surfacePoint, const float3& surfaceNormal,
+               const float3& lightSource, float lightSourcePower, float lightSourceSize, float lightSourceDistance,
+               float constantAttenuation, float linearAttenuation, float quadraticAttenuation,
+               float3* sphericalVectorList, std::uint32_t sampleCount)
+{
+#define MO_SURFACE_BIAS 0.01f
+
+    float value = 0.f;
+    for (std::uint32_t i = 0; i < sampleCount; ++i)
+    {
+        float3 delta = (lightSource + sphericalVectorList[i] * lightSourceSize) - surfacePoint;
+        float3 rayCast = normalize(delta);
+        float diffuseFactor = dot(surfaceNormal, rayCast);
+        if (diffuseFactor > 0.0)
+        {
+            float power = diffuseFactor * lightSourcePower / (constantAttenuation + linearAttenuation * length(delta) + quadraticAttenuation * length2(delta));
+            MoIntersectResult intersection = {};
+            if (moIntersectBVH(bvh, MoRay(surfacePoint + surfaceNormal * MO_SURFACE_BIAS, rayCast), intersection, pAlgorithm))
+            {
+                if (intersection.distance < lightSourceDistance)
+                {
+                    // light is occluded
+                    power *= 0.f;
+                }
+            }
+            power /= sampleCount;
+            value += power;
+        }
+    }
+    return value;
+}
+
 void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, const MoLightmapCreateInfo* pCreateInfo)
 {
+#define MO_UV_MULTISAMPLE_OFFSET 1.0f
+
     static std::random_device rd{};
     static std::mt19937 gen{rd()};
     static float3* sSphericalDirectionVectorList = nullptr;
     static float3* sSphericalPositionVectorList = nullptr;
     static std::uint32_t sVectorListSize = 0;
 
-    if (sVectorListSize < pCreateInfo->ambiantLightingSampleCount)
+    std::uint32_t sampleCount = std::max({pCreateInfo->ambiantLightingSampleCount, pCreateInfo->directionalLightingSampleCount, pCreateInfo->pointLightingSampleCount});
+    if (sVectorListSize < sampleCount)
     {
         std::uniform_real_distribution<float> genX(-1.f, 1.f);
         std::uniform_real_distribution<float> genY(-1.f, 1.f);
@@ -539,7 +574,6 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
 
         std::uint32_t temp1 = sVectorListSize;
         std::uint32_t temp2 = temp1;
-        std::uint32_t sampleCount = std::max(pCreateInfo->ambiantLightingSampleCount, pCreateInfo->directionalLightingSampleCount);
         carray_resize(&sSphericalDirectionVectorList, &temp1, sampleCount);
         carray_resize(&sSphericalPositionVectorList, &temp2, sampleCount);
         for (std::uint32_t at = sVectorListSize; at < sampleCount;)
@@ -554,8 +588,6 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
         sVectorListSize = sampleCount;
     }
 
-#define MO_UV_MULTISAMPLE_OFFSET 1.0f
-#define MO_SURFACE_BIAS 0.01f
     MoIntersectBVHAlgorithm intersectAlgorithm;
     intersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object) -> float
     {
@@ -615,7 +647,7 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
                         const MoTriangle& triangle = *intersectionUV.pTriangle;
 
                         float3 barycentricCoordinates = triangle.uvBarycentric(uv);
-                        float3 world = triangle.v0 * barycentricCoordinates[0]
+                        float3 surfacePoint = triangle.v0 * barycentricCoordinates[0]
                                 + triangle.v1 * barycentricCoordinates[1]
                                 + triangle.v2 * barycentricCoordinates[2];
 
@@ -624,69 +656,29 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
                                 + triangle.n2 * barycentricCoordinates[2];
                         surfaceNormal = normalize(surfaceNormal);
 
-                        float value = 0.f;
                         // ambiant
-                        for (std::uint32_t i = 0; i < pCreateInfo->ambiantLightingSampleCount; ++i)
-                        {
-                            float3 rayCast = sSphericalDirectionVectorList[i];
-                            float diffuseFactor = 1.f;
-                            float ambiantLightingWhitePoint = 2.f; // fully lit from top hemisphere IS fully lit
-                            if (pCreateInfo->enableAmbiantLightingSurfaceDiffusion != 0)
-                            {
-                                diffuseFactor = dot(surfaceNormal, rayCast);
-                                ambiantLightingWhitePoint *= 2.f;
-                            }
-                            if (pCreateInfo->enableAmbiantLightingSurfaceDiffusion == 0 || diffuseFactor > 0.0)
-                            {
-                                float contribution = diffuseFactor * (pCreateInfo->ambiantLightingContribution * ambiantLightingWhitePoint);
-                                contribution /= pCreateInfo->ambiantLightingSampleCount;
-
-                                MoIntersectResult intersection = {};
-                                if (moIntersectBVH(mesh->bvh, MoRay(world + surfaceNormal * MO_SURFACE_BIAS, rayCast), intersection, &intersectAlgorithm))
-                                {
-                                    if (intersection.distance < pCreateInfo->ambiantOcclusionDistance)
-                                    {
-                                        // we're occluded
-                                        contribution *= 0.f;
-                                    }
-                                    else
-                                    {
-                                        // smooth transition
-                                        contribution *= std::min(intersection.distance - pCreateInfo->ambiantOcclusionDistance, pCreateInfo->ambiantOcclusionDistance) / pCreateInfo->ambiantOcclusionDistance;
-                                    }
-                                }
-
-                                value += contribution;
-                            }
-                        }
+                        float value = moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
+                            surfacePoint, pCreateInfo->ambiantLightingPower * 2.f/*top hemisphere*/ * 2.f/*white point*/, 1.f, pCreateInfo->ambiantOcclusionDistance,
+                                               1.f, 0.f, 0.f,
+                            sSphericalDirectionVectorList, pCreateInfo->ambiantLightingSampleCount);
 
                         // directional
                         for (std::uint32_t j = 0; j < pCreateInfo->directionalLightSourceCount; ++j)
                         {
                             float relativeSamplingRadius = std::sin(pCreateInfo->pDirectionalLightSources[j].angularSize);
-                            for (std::uint32_t i = 0; i < pCreateInfo->directionalLightingSampleCount; ++i)
-                            {
-                                float3 rayCast = normalize(pCreateInfo->pDirectionalLightSources[j].direction + sSphericalPositionVectorList[i] * relativeSamplingRadius);
-                                float diffuseFactor = dot(surfaceNormal, rayCast);
-                                if (diffuseFactor > 0.0)
-                                {
-                                    float contribution = 0.f;
+                            value += moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
+                                surfacePoint + pCreateInfo->pDirectionalLightSources[j].direction, pCreateInfo->pDirectionalLightSources[j].power, relativeSamplingRadius, std::numeric_limits<float>::max(),
+                                              1.f, 0.f, 0.f,
+                                sSphericalPositionVectorList, pCreateInfo->directionalLightingSampleCount);
+                        }
 
-                                    MoIntersectResult intersection = {};
-                                    if (moIntersectBVH(mesh->bvh, MoRay(world + surfaceNormal * MO_SURFACE_BIAS, rayCast), intersection, &intersectAlgorithm))
-                                    {
-                                        // we're occluded
-                                    }
-                                    else
-                                    {
-                                        contribution = diffuseFactor * pCreateInfo->pDirectionalLightSources[j].contribution;
-                                        contribution /= pCreateInfo->directionalLightingSampleCount;
-
-                                    }
-
-                                    value += contribution;
-                                }
-                            }
+                        // point
+                        for (std::uint32_t j = 0; j < pCreateInfo->pointLightSourceCount; ++j)
+                        {
+                            value += moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
+                                pCreateInfo->pPointLightSources[j].position, pCreateInfo->pPointLightSources[j].power, pCreateInfo->pPointLightSources[j].size, length(pCreateInfo->pPointLightSources[j].position - surfacePoint),
+                                              pCreateInfo->pPointLightSources[j].constantAttenuation, pCreateInfo->pPointLightSources[j].linearAttenuation, pCreateInfo->pPointLightSources[j].quadraticAttenuation,
+                                sSphericalPositionVectorList, pCreateInfo->pointLightingSampleCount);
                         }
 
                         pTextureSamples[index].x = pTextureSamples[index].y = pTextureSamples[index].z = std::uint8_t(std::min(255.f, value * 255));

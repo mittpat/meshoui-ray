@@ -23,6 +23,13 @@ int main(int, char**)
          0.009f} // the sun's angular radius
     };
 
+    MoPointLight pointLightSources[1] = {
+        {float3(2,2,2),
+         2.f,
+         0.1f,
+         0.f, 1.f, 0.f}
+    };
+
     std::string filename = "teapot.dae";
     if (!filename.empty() && std::filesystem::exists(filename))
     {
@@ -38,13 +45,15 @@ int main(int, char**)
             info.nullColor = {127,127,127,255};
             info.width = 512;
             info.height = 512;
-            info.enableAmbiantLightingSurfaceDiffusion = 1;
             info.ambiantLightingSampleCount = 256;
-            info.ambiantLightingContribution = 0.4f;
+            info.ambiantLightingPower = 0.4f;
             info.ambiantOcclusionDistance = 1.f;
             info.directionalLightingSampleCount = 32;
             info.pDirectionalLightSources = directionalLightSources;
             info.directionalLightSourceCount = 1;
+            info.pointLightingSampleCount = 32;
+            info.pPointLightSources = pointLightSources;
+            info.pointLightSourceCount = 0;
             std::vector<MoTextureSample> output(info.width * info.height, {0,0,0,0});
             moGenerateLightMap(triangleList, output.data(), &info);
             moDestroyTriangleList(triangleList);
