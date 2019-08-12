@@ -663,10 +663,10 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
                         // directional
                         for (std::uint32_t j = 0; j < pCreateInfo->directionalLightSourceCount; ++j)
                         {
+                            float relativeSamplingRadius = std::sin(pCreateInfo->pDirectionalLightSources[j].angularSize);
                             for (std::uint32_t i = 0; i < pCreateInfo->directionalLightingSampleCount; ++i)
                             {
-                                float relativeSamplingRadius = 0.05f;
-                                float3 rayCast = normalize(pCreateInfo->pDirectionalLightSources[j].xyz() + sSphericalPositionVectorList[i] * relativeSamplingRadius);
+                                float3 rayCast = normalize(pCreateInfo->pDirectionalLightSources[j].direction + sSphericalPositionVectorList[i] * relativeSamplingRadius);
                                 float diffuseFactor = dot(surfaceNormal, rayCast);
                                 if (diffuseFactor > 0.0)
                                 {
@@ -679,7 +679,7 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
                                     }
                                     else
                                     {
-                                        contribution = diffuseFactor * pCreateInfo->pDirectionalLightSources[j].w;
+                                        contribution = diffuseFactor * pCreateInfo->pDirectionalLightSources[j].contribution;
                                         contribution /= pCreateInfo->directionalLightingSampleCount;
 
                                     }

@@ -17,7 +17,11 @@ using namespace linalg::aliases;
 
 int main(int, char**)
 {
-    float4 lightSources[1] = {{float4(normalize(float3(1,1,1)),0.6f)}};
+    MoDirectionalLight directionalLightSources[1] = {
+        {normalize(float3(1,1,1)),
+         0.6f,
+         0.009f} // the sun's angular radius
+    };
 
     std::string filename = "teapot.dae";
     if (!filename.empty() && std::filesystem::exists(filename))
@@ -38,8 +42,8 @@ int main(int, char**)
             info.ambiantLightingSampleCount = 256;
             info.ambiantLightingContribution = 0.4f;
             info.ambiantOcclusionDistance = 1.f;
-            info.directionalLightingSampleCount = 64;
-            info.pDirectionalLightSources = lightSources;
+            info.directionalLightingSampleCount = 32;
+            info.pDirectionalLightSources = directionalLightSources;
             info.directionalLightSourceCount = 1;
             std::vector<MoTextureSample> output(info.width * info.height, {0,0,0,0});
             moGenerateLightMap(triangleList, output.data(), &info);

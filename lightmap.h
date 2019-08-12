@@ -123,6 +123,13 @@ typedef struct MoTriangleList_T
 void moCreateTriangleList(const aiMesh* ai_mesh, MoTriangleList *pTriangleList);
 void moDestroyTriangleList(MoTriangleList triangleList);
 
+struct MoDirectionalLight
+{
+    linalg::aliases::float3 direction;
+    float                   contribution;
+    float                   angularSize;
+};
+
 struct MoLightmapCreateInfo {
     linalg::aliases::byte4   nullColor;
     std::uint32_t            width;
@@ -135,7 +142,7 @@ struct MoLightmapCreateInfo {
     float                    ambiantOcclusionDistance;
     // directional lighting
     std::uint32_t            directionalLightingSampleCount;
-    linalg::aliases::float4* pDirectionalLightSources;
+    MoDirectionalLight*      pDirectionalLightSources;
     std::uint32_t            directionalLightSourceCount;
     // point lighting
     linalg::aliases::float4* pPointLightSources;
