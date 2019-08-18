@@ -1,6 +1,7 @@
 #pragma once
 
 #include <linalg.h>
+#include <iosfwd>
 
 class MoRay
 {
@@ -144,6 +145,7 @@ struct MoLightmapCreateInfo {
     linalg::aliases::byte4   nullColor;
     std::uint32_t            width;
     std::uint32_t            height;
+    std::uint32_t            flipY;
     // ambiant lighting
     std::uint32_t            ambiantLightingSampleCount;
     float                    ambiantLightingPower;
@@ -159,7 +161,7 @@ struct MoLightmapCreateInfo {
 };
 
 typedef linalg::aliases::byte4 MoTextureSample; //rgba
-void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, const MoLightmapCreateInfo* pCreateInfo);
+void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, const MoLightmapCreateInfo* pCreateInfo, std::ostream* pLog = nullptr);
 
 /*
 ------------------------------------------------------------------------------

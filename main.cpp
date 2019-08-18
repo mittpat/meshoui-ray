@@ -1,5 +1,9 @@
 #include "lightmap.h"
 
+#include <string>
+
+#include <cxxopts.hpp>
+
 #include <experimental/filesystem>
 
 #include <assimp/Importer.hpp>
@@ -15,8 +19,33 @@ namespace std { namespace filesystem = experimental::filesystem; }
 using namespace linalg;
 using namespace linalg::aliases;
 
-int main(int, char**)
+int main(int argc, char** argv)
 {
+    std::string filename;
+    try
+    {
+        cxxopts::Options options(argv[0], "Generate light maps from geometry and uv within Collada files.");
+        options
+          .positional_help("[optional args]")
+          .show_positional_help();
+        options.add_options()
+          ("f,file", "File name (.dae)", cxxopts::value<std::string>()->default_value("teapot.dae"))
+          ("help", "Print help")
+          ;
+        cxxopts::ParseResult result = options.parse(argc, argv);
+        if (result.count("help"))
+        {
+            std::cout << options.help({"", "Group"}) << std::endl;
+            exit(0);
+        }
+        filename = result["file"].as<std::string>();
+    }
+    catch (const cxxopts::OptionException& e)
+    {
+        std::cout << "error parsing options: " << e.what() << std::endl;
+        exit(1);
+    }
+
     MoDirectionalLight directionalLightSources[1] = {
         {normalize(float3(1,1,1)),
          0.6f,
@@ -30,9 +59,10 @@ int main(int, char**)
          0.f, 1.f, 0.f}
     };
 
-    std::string filename = "teapot.dae";
     if (!filename.empty() && std::filesystem::exists(filename))
     {
+        std::cout << "generating light map for " << filename << std::endl;
+
         Assimp::Importer importer;
         const aiScene * scene = importer.ReadFile(filename, aiProcess_Debone | aiProcessPreset_TargetRealtime_Fast);
 
@@ -55,12 +85,14 @@ int main(int, char**)
             info.pPointLightSources = pointLightSources;
             info.pointLightSourceCount = 0;
             std::vector<MoTextureSample> output(info.width * info.height, {0,0,0,0});
-            moGenerateLightMap(triangleList, output.data(), &info);
+            moGenerateLightMap(triangleList, output.data(), &info, &std::cout);
             moDestroyTriangleList(triangleList);
 
     #ifdef MO_SAVE_TO_FILE
             // self shadowing test
-            stbi_write_png((std::string("test_uv_") + std::to_string(meshIdx) + ".png").c_str(), info.width, info.height, 4, output.data(), 4 * info.width);
+            std::string outputFilename = std::string("test_uv_") + std::to_string(meshIdx) + ".png";
+            stbi_write_png(outputFilename.c_str(), info.width, info.height, 4, output.data(), 4 * info.width);
+            std::cout << "saved output as " << outputFilename << std::endl;
     #endif
         }
     }

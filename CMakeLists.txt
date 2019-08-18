@@ -5,14 +5,19 @@ find_package(Threads)
 
 add_subdirectory(3rdparty)
 
-add_executable(meshouiray
-    main.cpp
-    lightmap.h lightmap.cpp)
-
+add_library(meshouiray lightmap.h lightmap.cpp)
+target_include_directories(meshouiray PUBLIC .)
 if(NOT MSVC)
-    target_link_libraries(meshouiray assimp linalg stb stdc++fs Threads::Threads)
+   target_link_libraries(meshouiray PUBLIC assimp linalg PRIVATE Threads::Threads)
 else()
-    target_link_libraries(meshouiray assimp linalg stb)
+   target_link_libraries(meshouiray PUBLIC assimp linalg)
+endif()
+
+add_executable(lightmapgen main.cpp)
+if(NOT MSVC)
+    target_link_libraries(lightmapgen PRIVATE meshouiray cxxopts stb stdc++fs)
+else()
+    target_link_libraries(lightmapgen PRIVATE meshouiray cxxopts stb)
 endif()
 
 add_custom_command(TARGET meshouiray POST_BUILD

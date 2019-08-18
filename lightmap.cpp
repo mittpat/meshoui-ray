@@ -6,7 +6,9 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <iostream>
 #include <limits>
+#include <mutex>
 #include <random>
 #include <thread>
 #include <vector>
@@ -555,8 +557,11 @@ float moGather(MoBVH bvh, MoIntersectBVHAlgorithm* pAlgorithm, const float3& sur
     return value;
 }
 
-void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, const MoLightmapCreateInfo* pCreateInfo)
+void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, const MoLightmapCreateInfo* pCreateInfo, std::ostream *pLog)
 {
+    std::mutex logMutex;
+    std::uint32_t rowsCompleted = 0;
+
 #define MO_UV_MULTISAMPLE_OFFSET 1.0f
 
     static std::random_device rd{};
@@ -632,7 +637,15 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
                 float2 uv((column + 0.5f) / float(pCreateInfo->width), (row + 0.5f) / float(pCreateInfo->height));
                 MoIntersectResult intersectionUV = {};
 
-                std::uint32_t index = (pCreateInfo->height - row - 1) * pCreateInfo->width + column;
+                std::uint32_t index = column;
+                if (pCreateInfo->flipY == 1)
+                {
+                    index += row * pCreateInfo->width;
+                }
+                else
+                {
+                    index += (pCreateInfo->height - row - 1) * pCreateInfo->width;
+                }
 
                 float3 multiTexels[] = {float3(uv, -1.0f),
                                          float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->width),  MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->height)), -1.0f),
@@ -691,11 +704,24 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
                     pTextureSamples[index] = pCreateInfo->nullColor;
                 }
             }
+
+            if (pLog)
+            {
+                std::lock_guard<std::mutex> lock(logMutex);
+                ++rowsCompleted;
+                if (rowsCompleted <= 1) *pLog << "\r" << rowsCompleted << " line generated" << std::flush;
+                else *pLog << "\r" << rowsCompleted << " lines generated" << std::flush;
+            }
         }));
     }
     for (auto & thread : threads)
     {
         thread.join();
+    }
+
+    if (pLog)
+    {
+        *pLog << std::endl << "generating done" << std::endl;
     }
 }
 
