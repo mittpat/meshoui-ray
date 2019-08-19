@@ -147,36 +147,30 @@ void MoBBox::expandToInclude(const MoBBox& box)
 }
 
 // adapted from Tavian Barnes' "Fast, Branchless Ray/Bounding Box Intersections"
-bool MoBBox::intersect(const MoRay& ray, float* t_near, float* t_far) const
+bool MoBBox::intersect(const MoRay& ray, float &t_near, float &t_far) const
 {
     float tx1 = (min.x - ray.origin.x) * ray.oneOverDirection.x;
     float tx2 = (max.x - ray.origin.x) * ray.oneOverDirection.x;
 
-    float tmin = std::min(tx1, tx2);
-    float tmax = std::max(tx1, tx2);
+    t_near = std::min(tx1, tx2);
+    t_far = std::max(tx1, tx2);
 
     float ty1 = (min.y - ray.origin.y) * ray.oneOverDirection.y;
     float ty2 = (max.y - ray.origin.y) * ray.oneOverDirection.y;
 
-    tmin = std::max(tmin, std::min(ty1, ty2));
-    tmax = std::min(tmax, std::max(ty1, ty2));
+    t_near = std::max(t_near, std::min(ty1, ty2));
+    t_far = std::min(t_far, std::max(ty1, ty2));
 
     float tz1 = (min.z - ray.origin.z) * ray.oneOverDirection.z;
     float tz2 = (max.z - ray.origin.z) * ray.oneOverDirection.z;
 
-    tmin = std::max(tmin, std::min(tz1, tz2));
-    tmax = std::min(tmax, std::max(tz1, tz2));
+    t_near = std::max(t_near, std::min(tz1, tz2));
+    t_far = std::min(t_far, std::max(tz1, tz2));
 
-    if (t_near)
-        *t_near = tmin;
-
-    if (t_far)
-        *t_far = tmax;
-
-    return tmax >= tmin;
+    return t_far >= t_near;
 }
 
-float3 MoTriangle::uvBarycentric(const float2 &uv) const
+float3 MoTriangle::getUVBarycentric(const float2 &uv) const
 {
     float x[4] = {uv.x, uv0.x, uv1.x, uv2.x};
     float y[4] = {uv.y, uv0.y, uv1.y, uv2.y};
@@ -195,8 +189,21 @@ float3 MoTriangle::uvBarycentric(const float2 &uv) const
     return float3(l1, l2, l3);
 }
 
+void MoTriangle::getSurface(const float3& barycentricCoordinates, float3 &point, float3 &normal) const
+{
+    point = v0 * barycentricCoordinates[0]
+          + v1 * barycentricCoordinates[1]
+          + v2 * barycentricCoordinates[2];
+
+    normal = n0 * barycentricCoordinates[0]
+           + n1 * barycentricCoordinates[1]
+           + n2 * barycentricCoordinates[2];
+    normal = normalize(normal);
+}
+
 // Adapted from the Möller–Trumbore intersection algorithm
-bool moRayTriangleIntersect(const MoRay &ray, const MoTriangle &triangle, float3 &intersectionPoint)
+bool moRayTriangleIntersect(const MoRay &ray, const MoTriangle &triangle,
+                            float &t, float &u, float &v)
 {
     const float EPSILON = 0.0000001f;
     const float3 & vertex0 = triangle.v0;
@@ -214,25 +221,24 @@ bool moRayTriangleIntersect(const MoRay &ray, const MoTriangle &triangle, float3
 
     const float f = 1.0/a;
     const float3 s = ray.origin - vertex0;
-    const float u = f * linalg::dot(s, h);
+    u = f * linalg::dot(s, h);
     if (u < 0.0 || u > 1.0)
     {
         return false;
     }
 
     const float3 q = linalg::cross(s, edge1);
-    const float v = f * linalg::dot(ray.direction, q);
+    v = f * linalg::dot(ray.direction, q);
     if (v < 0.0 || u + v > 1.0)
     {
         return false;
     }
 
     // At this stage we can compute t to find out where the intersection point is on the line.
-    const float t = f * linalg::dot(edge2, q);
+    t = f * linalg::dot(edge2, q);
     if (t > EPSILON)
     {
         // ray intersection
-        intersectionPoint = ray.origin + ray.direction * t;
         return true;
     }
 
@@ -413,22 +419,26 @@ bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoIntersectResult& intersection
         {
             for (std::uint32_t i = 0; i < node.count; ++i)
             {
-                intersection.pTriangle = &bvh->pObjects[node.start + i];
-                float currentDistance = pAlgorithm->intersectObj(ray, *intersection.pTriangle);
+                float u, v;
+                const MoTriangle& triangle = bvh->pObjects[node.start + i];
+                float currentDistance = pAlgorithm->intersectObj(ray, triangle, u, v);
                 if (currentDistance <= 0.0)
                 {
+                    intersection.pTriangle = &triangle;
                     return true;
                 }
                 if (currentDistance < intersection.distance)
                 {
+                    intersection.pTriangle = &triangle;
+                    intersection.barycentric = {1.f - u - v, u, v};
                     intersection.distance = currentDistance;
                 }
             }
         }
         else
         {
-            bool hitLeft = pAlgorithm->intersectBBox(ray, bvh->pSplitNodes[index + 1].boundingBox, &bbhits[0], &bbhits[1]);
-            bool hitRight = pAlgorithm->intersectBBox(ray, bvh->pSplitNodes[index + node.offset].boundingBox, &bbhits[2], &bbhits[3]);
+            bool hitLeft = pAlgorithm->intersectBBox(ray, bvh->pSplitNodes[index + 1].boundingBox, bbhits[0], bbhits[1]);
+            bool hitRight = pAlgorithm->intersectBBox(ray, bvh->pSplitNodes[index + node.offset].boundingBox, bbhits[2], bbhits[3]);
 
             if (hitLeft && hitRight)
             {
@@ -525,20 +535,42 @@ void moDestroyTriangleList(MoTriangleList triangleList)
     delete triangleList;
 }
 
-float moGather(MoBVH bvh, MoIntersectBVHAlgorithm* pAlgorithm, const float3& surfacePoint, const float3& surfaceNormal,
+float3 moNextSphericalSample(std::mt19937 * generator, bool direction = false)
+{
+    std::uniform_real_distribution<float> genX(-1.f, 1.f);
+    std::uniform_real_distribution<float> genY(-1.f, 1.f);
+    std::uniform_real_distribution<float> genZ(-1.f, 1.f);
+    float3 vect;
+    do
+    {
+        vect = float3(genX(*generator), genY(*generator), genZ(*generator));
+    }
+    while (length2(vect) < 1.f);
+    if (direction)
+    {
+        vect = normalize(vect);
+    }
+    return vect;
+}
+
+float3 moGather(MoBVH bvh, MoIntersectBVHAlgorithm* pAlgorithm, const float3& surfacePoint, const float3& surfaceNormal,
                const float3& lightSource, float lightSourcePower, float lightSourceSize, float lightSourceDistance,
                float constantAttenuation, float linearAttenuation, float quadraticAttenuation,
-               float3* sphericalVectorList, std::uint32_t sampleCount)
+               std::mt19937 * generator, bool directionalGenerator, std::uint32_t sampleCount)
 {
 #define MO_SURFACE_BIAS 0.01f
 
-    float value = 0.f;
+    float3 value = {};
     for (std::uint32_t i = 0; i < sampleCount; ++i)
     {
-        float3 delta = (lightSource + sphericalVectorList[i] * lightSourceSize) - surfacePoint;
+        float3 delta = lightSource - surfacePoint;
+        if (i > 0)
+        {
+            delta += moNextSphericalSample(generator, directionalGenerator) * lightSourceSize;
+        }
         float3 rayCast = normalize(delta);
         float diffuseFactor = dot(surfaceNormal, rayCast);
-        if (diffuseFactor > 0.0)
+        if (diffuseFactor > 0.f)
         {
             float power = diffuseFactor * lightSourcePower / (constantAttenuation + linearAttenuation * length(delta) + quadraticAttenuation * length2(delta));
             MoIntersectResult intersection = {};
@@ -548,6 +580,9 @@ float moGather(MoBVH bvh, MoIntersectBVHAlgorithm* pAlgorithm, const float3& sur
                 {
                     // light is occluded
                     power *= 0.f;
+
+                    //float3 impactPoint, impactNormal;
+                    //intersection.pTriangle->getSurface(intersection.barycentric, impactPoint, impactNormal);
                 }
             }
             power /= sampleCount;
@@ -559,57 +594,30 @@ float moGather(MoBVH bvh, MoIntersectBVHAlgorithm* pAlgorithm, const float3& sur
 
 void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, const MoLightmapCreateInfo* pCreateInfo, std::ostream *pLog)
 {
+    std::mt19937 generator;
+
     std::mutex logMutex;
     std::uint32_t rowsCompleted = 0;
 
 #define MO_UV_MULTISAMPLE_OFFSET 1.0f
 
-    static std::random_device rd{};
-    static std::mt19937 gen{rd()};
-    static float3* sSphericalDirectionVectorList = nullptr;
-    static float3* sSphericalPositionVectorList = nullptr;
-    static std::uint32_t sVectorListSize = 0;
-
-    std::uint32_t sampleCount = std::max({pCreateInfo->ambiantLightingSampleCount, pCreateInfo->directionalLightingSampleCount, pCreateInfo->pointLightingSampleCount});
-    if (sVectorListSize < sampleCount)
-    {
-        std::uniform_real_distribution<float> genX(-1.f, 1.f);
-        std::uniform_real_distribution<float> genY(-1.f, 1.f);
-        std::uniform_real_distribution<float> genZ(-1.f, 1.f);
-
-        std::uint32_t temp1 = sVectorListSize;
-        std::uint32_t temp2 = temp1;
-        carray_resize(&sSphericalDirectionVectorList, &temp1, sampleCount);
-        carray_resize(&sSphericalPositionVectorList, &temp2, sampleCount);
-        for (std::uint32_t at = sVectorListSize; at < sampleCount;)
-        {
-            float3 vect(genX(gen), genY(gen), genZ(gen));
-            if (length2(vect) < 1.f)
-            {
-                sSphericalPositionVectorList[at] = vect;
-                sSphericalDirectionVectorList[at++] = normalize(vect);
-            }
-        }
-        sVectorListSize = sampleCount;
-    }
-
     MoIntersectBVHAlgorithm intersectAlgorithm;
-    intersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object) -> float
+    intersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object, float& u, float& v) -> float
     {
-        float3 intersectionPoint;
-        if (moRayTriangleIntersect(ray, object, intersectionPoint))
+        float t;
+        if (moRayTriangleIntersect(ray, object, t, u, v))
         {
-            return length(intersectionPoint - ray.origin);
+            return t;
         }
         return std::numeric_limits<float>::max();
     };
-    intersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float* t_near, float* t_far) -> bool
+    intersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float& t_near, float& t_far) -> bool
     {
         return bbox.intersect(ray, t_near, t_far);
     };
 
     MoIntersectBVHAlgorithm uvIntersectAlgorithm;
-    uvIntersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object) -> float
+    uvIntersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object, float&, float&) -> float
     {
         if (moTexcoordInTriangleUV(ray.origin.xy(), object))
         {
@@ -617,13 +625,13 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
         }
         return std::numeric_limits<float>::max();
     };
-    uvIntersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float* t_near, float* t_far) -> bool
+    uvIntersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float& t_near, float& t_far) -> bool
     {
         return bbox.intersect(ray, t_near, t_far);
     };
 
     std::deque<std::thread> threads;
-    for (std::uint32_t row = 0; row < pCreateInfo->height; ++row)
+    for (std::uint32_t row = 0; row < pCreateInfo->size.y; ++row)
     {
         if (threads.size() > std::thread::hardware_concurrency())
         {
@@ -632,26 +640,25 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
         }
         threads.emplace_back(std::thread([&, row]()
         {
-            for (std::uint32_t column = 0; column < pCreateInfo->width; ++column)
+            for (std::uint32_t column = 0; column < pCreateInfo->size.x; ++column)
             {
-                float2 uv((column + 0.5f) / float(pCreateInfo->width), (row + 0.5f) / float(pCreateInfo->height));
+                std::mt19937 coherentGenerator;
+                std::mt19937* localGenerator = &generator;
+                if (pCreateInfo->despeckle == 1) localGenerator = &coherentGenerator;
+
+                float2 uv((column + 0.5f) / float(pCreateInfo->size.x),
+                          (row + 0.5f) / float(pCreateInfo->size.y));
                 MoIntersectResult intersectionUV = {};
 
                 std::uint32_t index = column;
-                if (pCreateInfo->flipY == 1)
-                {
-                    index += row * pCreateInfo->width;
-                }
-                else
-                {
-                    index += (pCreateInfo->height - row - 1) * pCreateInfo->width;
-                }
+                if (pCreateInfo->flipY == 1) index += row * pCreateInfo->size.x;
+                else index += (pCreateInfo->size.y - row - 1) * pCreateInfo->size.x;
 
                 float3 multiTexels[] = {float3(uv, -1.0f),
-                                         float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->width),  MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->height)), -1.0f),
-                                         float3(uv + float2(-MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->width), -MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->height)), -1.0f),
-                                         float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->width), -MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->height)), -1.0f),
-                                         float3(uv + float2(-MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->width),  MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->height)), -1.0f)
+                                         float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x),  MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f),
+                                         float3(uv + float2(-MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x), -MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f),
+                                         float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x), -MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f),
+                                         float3(uv + float2(-MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x),  MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f)
                                         };
                 for (float3 singleTexel : multiTexels)
                 {
@@ -659,21 +666,14 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
                     {
                         const MoTriangle& triangle = *intersectionUV.pTriangle;
 
-                        float3 barycentricCoordinates = triangle.uvBarycentric(uv);
-                        float3 surfacePoint = triangle.v0 * barycentricCoordinates[0]
-                                + triangle.v1 * barycentricCoordinates[1]
-                                + triangle.v2 * barycentricCoordinates[2];
+                        float3 surfacePoint, surfaceNormal;
+                        triangle.getSurface(triangle.getUVBarycentric(uv), surfacePoint, surfaceNormal);
 
-                        float3 surfaceNormal = triangle.n0 * barycentricCoordinates[0]
-                                + triangle.n1 * barycentricCoordinates[1]
-                                + triangle.n2 * barycentricCoordinates[2];
-                        surfaceNormal = normalize(surfaceNormal);
-
-                        // ambiant
-                        float value = moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
-                            surfacePoint, pCreateInfo->ambiantLightingPower * 2.f/*top hemisphere*/ * 2.f/*white point*/, 1.f, pCreateInfo->ambiantOcclusionDistance,
+                        // ambient
+                        float3 value = moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
+                            surfacePoint, pCreateInfo->ambientLightingPower * 2.f/*top hemisphere*/ * 2.f/*white point*/, 1.f, pCreateInfo->ambientOcclusionDistance,
                                                1.f, 0.f, 0.f,
-                            sSphericalDirectionVectorList, pCreateInfo->ambiantLightingSampleCount);
+                            localGenerator, true, pCreateInfo->ambientLightingSampleCount);
 
                         // directional
                         for (std::uint32_t j = 0; j < pCreateInfo->directionalLightSourceCount; ++j)
@@ -682,7 +682,7 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
                             value += moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
                                 surfacePoint + pCreateInfo->pDirectionalLightSources[j].direction, pCreateInfo->pDirectionalLightSources[j].power, relativeSamplingRadius, std::numeric_limits<float>::max(),
                                               1.f, 0.f, 0.f,
-                                sSphericalPositionVectorList, pCreateInfo->directionalLightingSampleCount);
+                                localGenerator, false, pCreateInfo->directionalLightingSampleCount);
                         }
 
                         // point
@@ -691,11 +691,14 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
                             value += moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
                                 pCreateInfo->pPointLightSources[j].position, pCreateInfo->pPointLightSources[j].power, pCreateInfo->pPointLightSources[j].size, length(pCreateInfo->pPointLightSources[j].position - surfacePoint),
                                               pCreateInfo->pPointLightSources[j].constantAttenuation, pCreateInfo->pPointLightSources[j].linearAttenuation, pCreateInfo->pPointLightSources[j].quadraticAttenuation,
-                                sSphericalPositionVectorList, pCreateInfo->pointLightingSampleCount);
+                                localGenerator, false, pCreateInfo->pointLightingSampleCount);
                         }
 
-                        pTextureSamples[index].x = pTextureSamples[index].y = pTextureSamples[index].z = std::uint8_t(std::min(255.f, value * 255));
+                        pTextureSamples[index].x = std::uint8_t(std::min(255.f, value.x * 255.999f));
+                        pTextureSamples[index].y = std::uint8_t(std::min(255.f, value.y * 255.999f));
+                        pTextureSamples[index].z = std::uint8_t(std::min(255.f, value.z * 255.999f));
                         pTextureSamples[index].w = pCreateInfo->nullColor.w;
+
                         break;
                     }
                 }

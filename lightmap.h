@@ -24,7 +24,7 @@ public:
     MoBBox(const linalg::aliases::float3& point);
 
     std::uint32_t longestSide() const;
-    bool intersect(const MoRay& ray, float* t_near = nullptr, float* t_far = nullptr) const;
+    bool intersect(const MoRay& ray, float& t_near, float& t_far) const;
     void expandToInclude(const linalg::aliases::float3& point);
     void expandToInclude(const MoBBox& box);
 
@@ -60,10 +60,11 @@ struct MoTriangle
     {
         return linalg::aliases::float3((uv0 + uv1 + uv2) / 3.0f, 0.f);
     }
-    linalg::aliases::float3 uvBarycentric(const linalg::aliases::float2& uv) const;
+    linalg::aliases::float3 getUVBarycentric(const linalg::aliases::float2& uv) const;
+    void getSurface(const linalg::aliases::float3& barycentricCoordinates, linalg::aliases::float3& point, linalg::aliases::float3& normal) const;
 };
 
-bool moRayTriangleIntersect(const MoRay& ray, const MoTriangle& triangle, linalg::aliases::float3& intersectionPoint);
+bool moRayTriangleIntersect(const MoRay& ray, const MoTriangle& triangle, float &t, float &u, float &v);
 
 bool moTexcoordInTriangleUV(linalg::aliases::float2 tex, const MoTriangle& triangle);
 
@@ -98,14 +99,15 @@ struct MoIntersectBVHAlgorithm
     // 0.0 intersects and returns immediately
     // > 0 intersects and continues to attempt to find nearer intersection
     // std::numeric_limits<float>::max() doesn't intersect
-    float (*intersectObj)(const MoRay& ray, const MoTriangle&);
+    float (*intersectObj)(const MoRay& ray, const MoTriangle&, float&, float&);
     // bbox, near, far -> bool
-    bool (*intersectBBox)(const MoRay& ray, const MoBBox&, float*, float*);
+    bool (*intersectBBox)(const MoRay& ray, const MoBBox&, float&, float&);
 };
 
 struct MoIntersectResult
 {
     const MoTriangle* pTriangle;
+    linalg::aliases::float3 barycentric;
     float distance;
 };
 
@@ -143,13 +145,13 @@ struct MoPointLight
 
 struct MoLightmapCreateInfo {
     linalg::aliases::byte4   nullColor;
-    std::uint32_t            width;
-    std::uint32_t            height;
+    linalg::aliases::uint2   size;
     std::uint32_t            flipY;
-    // ambiant lighting
-    std::uint32_t            ambiantLightingSampleCount;
-    float                    ambiantLightingPower;
-    float                    ambiantOcclusionDistance;
+    std::uint32_t            despeckle;
+    // ambient lighting
+    std::uint32_t            ambientLightingSampleCount;
+    float                    ambientLightingPower;
+    float                    ambientOcclusionDistance;
     // directional lighting
     std::uint32_t            directionalLightingSampleCount;
     MoDirectionalLight*      pDirectionalLightSources;

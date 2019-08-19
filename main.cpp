@@ -22,29 +22,7 @@ using namespace linalg::aliases;
 int main(int argc, char** argv)
 {
     std::string filename;
-    try
-    {
-        cxxopts::Options options(argv[0], "Generate light maps from geometry and uv within Collada files.");
-        options
-          .positional_help("[optional args]")
-          .show_positional_help();
-        options.add_options()
-          ("f,file", "File name (.dae)", cxxopts::value<std::string>()->default_value("teapot.dae"))
-          ("help", "Print help")
-          ;
-        cxxopts::ParseResult result = options.parse(argc, argv);
-        if (result.count("help"))
-        {
-            std::cout << options.help({"", "Group"}) << std::endl;
-            exit(0);
-        }
-        filename = result["file"].as<std::string>();
-    }
-    catch (const cxxopts::OptionException& e)
-    {
-        std::cout << "error parsing options: " << e.what() << std::endl;
-        exit(1);
-    }
+    std::string outputFilenameFmt;
 
     MoDirectionalLight directionalLightSources[1] = {
         {normalize(float3(1,1,1)),
@@ -59,39 +37,76 @@ int main(int argc, char** argv)
          0.f, 1.f, 0.f}
     };
 
+    MoLightmapCreateInfo info = {};
+    info.directionalLightingSampleCount = 1;
+    info.pDirectionalLightSources = directionalLightSources;
+    info.directionalLightSourceCount = 1;
+    info.pointLightingSampleCount = 32;
+    info.pPointLightSources = pointLightSources;
+    info.pointLightSourceCount = 0;
+
+    try
+    {
+        cxxopts::Options options(argv[0], "Generate light maps from geometry and uv within Collada files.");
+        options
+          .positional_help("[optional args]")
+          .show_positional_help();
+        options.add_options()
+          ("c,coherent", "Use coherent rays", cxxopts::value<bool>())
+          ("D,amb_dist", "Ambient distance clamp", cxxopts::value<float>()->default_value("1.f"))
+          ("P,amb_pow", "Ambient power [0-1]", cxxopts::value<float>()->default_value("1.f"))
+          ("S,amb_samp", "Ambient sample count", cxxopts::value<std::uint32_t>()->default_value("64"))
+          ("s,size", "Output size in pixels", cxxopts::value<std::vector<std::uint32_t>>()->default_value("256,256"))
+          ("f,file", "Input dae file name", cxxopts::value<std::string>()->default_value("teapot.dae"))
+          ("n,null", "Null color as 4-byte rgba", cxxopts::value<std::vector<std::uint8_t>>()->default_value("127,127,127,255"))
+          ("o,output", "Output png file name", cxxopts::value<std::string>()->default_value("%s_%d_lightmap.png"))
+          ("help", "Print help")
+          ;
+        cxxopts::ParseResult result = options.parse(argc, argv);
+        if (result.count("help"))
+        {
+            std::cout << options.help({"", "Group"}) << std::endl;
+            exit(0);
+        }
+        filename = result["file"].as<std::string>();
+        outputFilenameFmt = result["output"].as<std::string>();
+
+        info.despeckle = result["coherent"].as<bool>();
+        info.size = uint2(result["size"].as<std::vector<std::uint32_t>>().data());
+        info.nullColor = byte4(result["null"].as<std::vector<std::uint8_t>>().data());
+        info.ambientLightingSampleCount = result["amb_samp"].as<std::uint32_t>();
+        info.ambientLightingPower = result["amb_pow"].as<float>();
+        info.ambientOcclusionDistance = result["amb_dist"].as<float>();
+    }
+    catch (const cxxopts::OptionException& e)
+    {
+        std::cout << "error parsing options: " << e.what() << std::endl;
+        exit(1);
+    }
+
     if (!filename.empty() && std::filesystem::exists(filename))
     {
         std::cout << "generating light map for " << filename << std::endl;
+
+        std::vector<MoTextureSample> output(info.size.x * info.size.y);
 
         Assimp::Importer importer;
         const aiScene * scene = importer.ReadFile(filename, aiProcess_Debone | aiProcessPreset_TargetRealtime_Fast);
 
         for (std::uint32_t meshIdx = 0; meshIdx < scene->mNumMeshes; ++meshIdx)
         {
+            output = {};
+
             MoTriangleList triangleList;
             moCreateTriangleList(scene->mMeshes[meshIdx], &triangleList);
-
-            MoLightmapCreateInfo info = {};
-            info.nullColor = {127,127,127,255};
-            info.width = 512;
-            info.height = 512;
-            info.ambiantLightingSampleCount = 256;
-            info.ambiantLightingPower = 0.4f;
-            info.ambiantOcclusionDistance = 1.f;
-            info.directionalLightingSampleCount = 32;
-            info.pDirectionalLightSources = directionalLightSources;
-            info.directionalLightSourceCount = 1;
-            info.pointLightingSampleCount = 32;
-            info.pPointLightSources = pointLightSources;
-            info.pointLightSourceCount = 0;
-            std::vector<MoTextureSample> output(info.width * info.height, {0,0,0,0});
             moGenerateLightMap(triangleList, output.data(), &info, &std::cout);
             moDestroyTriangleList(triangleList);
 
     #ifdef MO_SAVE_TO_FILE
             // self shadowing test
-            std::string outputFilename = std::string("test_uv_") + std::to_string(meshIdx) + ".png";
-            stbi_write_png(outputFilename.c_str(), info.width, info.height, 4, output.data(), 4 * info.width);
+            char outputFilename[256];
+            std::snprintf(outputFilename, 256, outputFilenameFmt.c_str(), std::filesystem::path(filename).stem().c_str(), meshIdx);
+            stbi_write_png(outputFilename, info.size.x, info.size.y, 4, output.data(), 4 * info.size.x);
             std::cout << "saved output as " << outputFilename << std::endl;
     #endif
         }
