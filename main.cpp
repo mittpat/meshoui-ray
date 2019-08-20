@@ -1,5 +1,6 @@
 #include "lightmap.h"
 
+#include <chrono>
 #include <string>
 
 #include <cxxopts.hpp>
@@ -21,6 +22,8 @@ using namespace linalg::aliases;
 
 int main(int argc, char** argv)
 {
+    bool normalmap = false;
+    bool benchmark = false;
     std::string filename;
     std::string outputFilenameFmt;
 
@@ -52,14 +55,17 @@ int main(int argc, char** argv)
           .positional_help("[optional args]")
           .show_positional_help();
         options.add_options()
-          ("c,coherent", "Use coherent rays", cxxopts::value<bool>())
+          ("c,coherent", "Use coherent, despeckled rays", cxxopts::value<bool>())
           ("D,amb_dist", "Ambient distance clamp", cxxopts::value<float>()->default_value("1.f"))
           ("P,amb_pow", "Ambient power [0-1]", cxxopts::value<float>()->default_value("1.f"))
           ("S,amb_samp", "Ambient sample count", cxxopts::value<std::uint32_t>()->default_value("64"))
           ("s,size", "Output size in pixels", cxxopts::value<std::vector<std::uint32_t>>()->default_value("256,256"))
           ("f,file", "Input dae file name", cxxopts::value<std::string>()->default_value("teapot.dae"))
           ("n,null", "Null color as 4-byte rgba", cxxopts::value<std::vector<std::uint8_t>>()->default_value("127,127,127,255"))
-          ("o,output", "Output png file name", cxxopts::value<std::string>()->default_value("%s_%d_lightmap.png"))
+          ("N,normal", "Output world space normal map", cxxopts::value<bool>())
+          ("o,output", "Output png file name", cxxopts::value<std::string>()->default_value("%s_%d_%smap.png"))
+          ("j,jobs", "# of jobs, 0 is core count", cxxopts::value<std::uint32_t>()->default_value("0"))
+          ("b,benchmark", "Do not generate any output", cxxopts::value<bool>())
           ("help", "Print help")
           ;
         cxxopts::ParseResult result = options.parse(argc, argv);
@@ -68,10 +74,13 @@ int main(int argc, char** argv)
             std::cout << options.help({"", "Group"}) << std::endl;
             exit(0);
         }
+        normalmap = result["normal"].as<bool>();
+        benchmark = result["benchmark"].as<bool>();
         filename = result["file"].as<std::string>();
         outputFilenameFmt = result["output"].as<std::string>();
 
         info.despeckle = result["coherent"].as<bool>();
+        info.jobs = result["jobs"].as<std::uint32_t>();
         info.size = uint2(result["size"].as<std::vector<std::uint32_t>>().data());
         info.nullColor = byte4(result["null"].as<std::vector<std::uint8_t>>().data());
         info.ambientLightingSampleCount = result["amb_samp"].as<std::uint32_t>();
@@ -87,6 +96,7 @@ int main(int argc, char** argv)
     if (!filename.empty() && std::filesystem::exists(filename))
     {
         std::cout << "generating light map for " << filename << std::endl;
+        auto start = std::chrono::steady_clock::now();
 
         std::vector<MoTextureSample> output(info.size.x * info.size.y);
 
@@ -99,17 +109,28 @@ int main(int argc, char** argv)
 
             MoTriangleList triangleList;
             moCreateTriangleList(scene->mMeshes[meshIdx], &triangleList);
-            moGenerateLightMap(triangleList, output.data(), &info, &std::cout);
+            if (normalmap)
+            {
+                moGenerateNormalMap(triangleList, output.data(), &info, &std::cout);
+            }
+            else
+            {
+                moGenerateLightMap(triangleList, output.data(), &info, &std::cout);
+            }
             moDestroyTriangleList(triangleList);
 
-    #ifdef MO_SAVE_TO_FILE
-            // self shadowing test
-            char outputFilename[256];
-            std::snprintf(outputFilename, 256, outputFilenameFmt.c_str(), std::filesystem::path(filename).stem().c_str(), meshIdx);
-            stbi_write_png(outputFilename, info.size.x, info.size.y, 4, output.data(), 4 * info.size.x);
-            std::cout << "saved output as " << outputFilename << std::endl;
-    #endif
+            if (!benchmark)
+            {
+                char outputFilename[256];
+                std::snprintf(outputFilename, 256, outputFilenameFmt.c_str(), std::filesystem::path(filename).stem().c_str(), meshIdx, normalmap ? "normal" : "light");
+                stbi_write_png(outputFilename, info.size.x, info.size.y, 4, output.data(), 4 * info.size.x);
+                std::cout << "saved output as " << outputFilename << std::endl;
+            }
         }
+
+        auto end = std::chrono::steady_clock::now();
+        auto secs = std::chrono::duration_cast<std::chrono::duration<float>>(end - start);
+        std::cout << "Elapsed: " << secs.count() << "s\n";
     }
 
     return 0;

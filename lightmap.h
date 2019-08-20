@@ -104,6 +104,9 @@ struct MoIntersectBVHAlgorithm
     bool (*intersectBBox)(const MoRay& ray, const MoBBox&, float&, float&);
 };
 
+void moSetIntersectBVHAlgorithm_TriangleMesh(MoIntersectBVHAlgorithm* pAlgorithm);
+void moSetIntersectBVHAlgorithm_Texcoords(MoIntersectBVHAlgorithm* pAlgorithm);
+
 struct MoIntersectResult
 {
     const MoTriangle* pTriangle;
@@ -148,6 +151,7 @@ struct MoLightmapCreateInfo {
     linalg::aliases::uint2   size;
     std::uint32_t            flipY;
     std::uint32_t            despeckle;
+    std::uint32_t            jobs;
     // ambient lighting
     std::uint32_t            ambientLightingSampleCount;
     float                    ambientLightingPower;
@@ -164,6 +168,7 @@ struct MoLightmapCreateInfo {
 
 typedef linalg::aliases::byte4 MoTextureSample; //rgba
 void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, const MoLightmapCreateInfo* pCreateInfo, std::ostream* pLog = nullptr);
+void moGenerateNormalMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, const MoLightmapCreateInfo* pCreateInfo, std::ostream* pLog = nullptr);
 
 /*
 ------------------------------------------------------------------------------

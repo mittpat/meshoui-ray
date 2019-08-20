@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <mutex>
@@ -385,6 +386,39 @@ void moDestroyBVH(MoBVH bvh)
     delete bvh;
 }
 
+void moSetIntersectBVHAlgorithm_TriangleMesh(MoIntersectBVHAlgorithm *pAlgorithm)
+{
+    pAlgorithm->intersectObj = [](const MoRay& ray, const MoTriangle& object, float& u, float& v) -> float
+    {
+        float t;
+        if (moRayTriangleIntersect(ray, object, t, u, v))
+        {
+            return t;
+        }
+        return std::numeric_limits<float>::max();
+    };
+    pAlgorithm->intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float& t_near, float& t_far) -> bool
+    {
+        return bbox.intersect(ray, t_near, t_far);
+    };
+}
+
+void moSetIntersectBVHAlgorithm_Texcoords(MoIntersectBVHAlgorithm *pAlgorithm)
+{
+    pAlgorithm->intersectObj = [](const MoRay& ray, const MoTriangle& object, float&, float&) -> float
+    {
+        if (moTexcoordInTriangleUV(ray.origin.xy(), object))
+        {
+            return 0.0;
+        }
+        return std::numeric_limits<float>::max();
+    };
+    pAlgorithm->intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float& t_near, float& t_far) -> bool
+    {
+        return bbox.intersect(ray, t_near, t_far);
+    };
+}
+
 bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoIntersectResult& intersection, MoIntersectBVHAlgorithm* pAlgorithm)
 {
     intersection.distance = std::numeric_limits<float>::max();
@@ -592,6 +626,37 @@ float3 moGather(MoBVH bvh, MoIntersectBVHAlgorithm* pAlgorithm, const float3& su
     return value;
 }
 
+void moParallelFor(std::int32_t from, std::int32_t to, std::function<void(std::int32_t)> f, std::uint32_t jobs = 0)
+{
+    if (jobs != 1)
+    {
+        if (jobs == 0) jobs = std::thread::hardware_concurrency();
+        std::deque<std::thread> threads;
+        for (std::int32_t at = from; at < to; ++at)
+        {
+            if (threads.size() > jobs)
+            {
+                threads.front().join();
+                threads.pop_front();
+            }
+            threads.emplace_back(std::thread([f, at](){ f(at); }));
+        }
+        for (auto& thread : threads)
+        {
+            thread.join();
+        }
+    }
+    else
+    {
+        for (std::int32_t at = from; at < to; ++at)
+        {
+            f(at);
+        }
+    }
+}
+
+#define MO_UV_MULTISAMPLE_OFFSET 1.0f
+
 void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, const MoLightmapCreateInfo* pCreateInfo, std::ostream *pLog)
 {
     std::mt19937 generator;
@@ -599,128 +664,161 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
     std::mutex logMutex;
     std::uint32_t rowsCompleted = 0;
 
-#define MO_UV_MULTISAMPLE_OFFSET 1.0f
+    MoIntersectBVHAlgorithm intersectAlgorithm;
+    moSetIntersectBVHAlgorithm_TriangleMesh(&intersectAlgorithm);
+    MoIntersectBVHAlgorithm uvIntersectAlgorithm;
+    moSetIntersectBVHAlgorithm_Texcoords(&uvIntersectAlgorithm);
+
+    moParallelFor(0, pCreateInfo->size.y, [&](std::int32_t row) {
+        for (std::uint32_t column = 0; column < pCreateInfo->size.x; ++column)
+        {
+            std::mt19937 coherentGenerator;
+            std::mt19937* localGenerator = &generator;
+            if (pCreateInfo->despeckle == 1) localGenerator = &coherentGenerator;
+
+            float2 uv((column + 0.5f) / float(pCreateInfo->size.x),
+                      (row + 0.5f) / float(pCreateInfo->size.y));
+            MoIntersectResult intersectionUV = {};
+
+            std::uint32_t index = column;
+            if (pCreateInfo->flipY == 1) index += row * pCreateInfo->size.x;
+            else index += (pCreateInfo->size.y - row - 1) * pCreateInfo->size.x;
+
+            float3 multiTexels[] = {float3(uv, -1.0f),
+                                     float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x),  MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f),
+                                     float3(uv + float2(-MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x), -MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f),
+                                     float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x), -MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f),
+                                     float3(uv + float2(-MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x),  MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f)
+                                    };
+            for (float3 singleTexel : multiTexels)
+            {
+                if (moIntersectBVH(mesh->bvhUV, MoRay(singleTexel, {0,0,1}), intersectionUV, &uvIntersectAlgorithm))
+                {
+                    const MoTriangle& triangle = *intersectionUV.pTriangle;
+
+                    float3 surfacePoint, surfaceNormal;
+                    triangle.getSurface(triangle.getUVBarycentric(uv), surfacePoint, surfaceNormal);
+
+                    // ambient
+                    float3 value = moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
+                        surfacePoint, pCreateInfo->ambientLightingPower * 2.f/*top hemisphere*/ * 2.f/*white point*/, 1.f, pCreateInfo->ambientOcclusionDistance,
+                                           1.f, 0.f, 0.f,
+                        localGenerator, true, pCreateInfo->ambientLightingSampleCount);
+
+                    // directional
+                    for (std::uint32_t j = 0; j < pCreateInfo->directionalLightSourceCount; ++j)
+                    {
+                        float relativeSamplingRadius = std::sin(pCreateInfo->pDirectionalLightSources[j].angularSize);
+                        value += moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
+                            surfacePoint + pCreateInfo->pDirectionalLightSources[j].direction, pCreateInfo->pDirectionalLightSources[j].power, relativeSamplingRadius, std::numeric_limits<float>::max(),
+                                          1.f, 0.f, 0.f,
+                            localGenerator, false, pCreateInfo->directionalLightingSampleCount);
+                    }
+
+                    // point
+                    for (std::uint32_t j = 0; j < pCreateInfo->pointLightSourceCount; ++j)
+                    {
+                        value += moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
+                            pCreateInfo->pPointLightSources[j].position, pCreateInfo->pPointLightSources[j].power, pCreateInfo->pPointLightSources[j].size, length(pCreateInfo->pPointLightSources[j].position - surfacePoint),
+                                          pCreateInfo->pPointLightSources[j].constantAttenuation, pCreateInfo->pPointLightSources[j].linearAttenuation, pCreateInfo->pPointLightSources[j].quadraticAttenuation,
+                            localGenerator, false, pCreateInfo->pointLightingSampleCount);
+                    }
+
+                    pTextureSamples[index].x = std::uint8_t(std::min(255.f, value.x * 255.999f));
+                    pTextureSamples[index].y = std::uint8_t(std::min(255.f, value.y * 255.999f));
+                    pTextureSamples[index].z = std::uint8_t(std::min(255.f, value.z * 255.999f));
+                    pTextureSamples[index].w = pCreateInfo->nullColor.w;
+
+                    break;
+                }
+            }
+            if (pTextureSamples[index].w == 0)
+            {
+                pTextureSamples[index] = pCreateInfo->nullColor;
+            }
+        }
+
+        if (pLog)
+        {
+            std::lock_guard<std::mutex> lock(logMutex);
+            ++rowsCompleted;
+            if (rowsCompleted <= 1) *pLog << "\r" << rowsCompleted << " line generated" << std::flush;
+            else *pLog << "\r" << rowsCompleted << " lines generated" << std::flush;
+        }
+    }, pCreateInfo->jobs);
+
+    if (pLog)
+    {
+        *pLog << std::endl << "generating done" << std::endl;
+    }
+}
+
+void moGenerateNormalMap(const MoTriangleList mesh, MoTextureSample* pTextureSamples, const MoLightmapCreateInfo* pCreateInfo, std::ostream *pLog)
+{
+    std::mt19937 generator;
+
+    std::mutex logMutex;
+    std::uint32_t rowsCompleted = 0;
 
     MoIntersectBVHAlgorithm intersectAlgorithm;
-    intersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object, float& u, float& v) -> float
-    {
-        float t;
-        if (moRayTriangleIntersect(ray, object, t, u, v))
-        {
-            return t;
-        }
-        return std::numeric_limits<float>::max();
-    };
-    intersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float& t_near, float& t_far) -> bool
-    {
-        return bbox.intersect(ray, t_near, t_far);
-    };
-
+    moSetIntersectBVHAlgorithm_TriangleMesh(&intersectAlgorithm);
     MoIntersectBVHAlgorithm uvIntersectAlgorithm;
-    uvIntersectAlgorithm.intersectObj = [](const MoRay& ray, const MoTriangle& object, float&, float&) -> float
-    {
-        if (moTexcoordInTriangleUV(ray.origin.xy(), object))
-        {
-            return 0.0;
-        }
-        return std::numeric_limits<float>::max();
-    };
-    uvIntersectAlgorithm.intersectBBox = [](const MoRay& ray, const MoBBox& bbox, float& t_near, float& t_far) -> bool
-    {
-        return bbox.intersect(ray, t_near, t_far);
-    };
+    moSetIntersectBVHAlgorithm_Texcoords(&uvIntersectAlgorithm);
 
-    std::deque<std::thread> threads;
-    for (std::uint32_t row = 0; row < pCreateInfo->size.y; ++row)
-    {
-        if (threads.size() > std::thread::hardware_concurrency())
+    moParallelFor(0, pCreateInfo->size.y, [&](std::int32_t row) {
+        for (std::uint32_t column = 0; column < pCreateInfo->size.x; ++column)
         {
-            threads.front().join();
-            threads.pop_front();
-        }
-        threads.emplace_back(std::thread([&, row]()
-        {
-            for (std::uint32_t column = 0; column < pCreateInfo->size.x; ++column)
+            std::mt19937 coherentGenerator;
+            std::mt19937* localGenerator = &generator;
+            if (pCreateInfo->despeckle == 1) localGenerator = &coherentGenerator;
+
+            float2 uv((column + 0.5f) / float(pCreateInfo->size.x),
+                      (row + 0.5f) / float(pCreateInfo->size.y));
+            MoIntersectResult intersectionUV = {};
+
+            std::uint32_t index = column;
+            if (pCreateInfo->flipY == 1) index += row * pCreateInfo->size.x;
+            else index += (pCreateInfo->size.y - row - 1) * pCreateInfo->size.x;
+
+            float3 multiTexels[] = {float3(uv, -1.0f),
+                                     float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x),  MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f),
+                                     float3(uv + float2(-MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x), -MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f),
+                                     float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x), -MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f),
+                                     float3(uv + float2(-MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x),  MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f)
+                                    };
+            for (float3 singleTexel : multiTexels)
             {
-                std::mt19937 coherentGenerator;
-                std::mt19937* localGenerator = &generator;
-                if (pCreateInfo->despeckle == 1) localGenerator = &coherentGenerator;
-
-                float2 uv((column + 0.5f) / float(pCreateInfo->size.x),
-                          (row + 0.5f) / float(pCreateInfo->size.y));
-                MoIntersectResult intersectionUV = {};
-
-                std::uint32_t index = column;
-                if (pCreateInfo->flipY == 1) index += row * pCreateInfo->size.x;
-                else index += (pCreateInfo->size.y - row - 1) * pCreateInfo->size.x;
-
-                float3 multiTexels[] = {float3(uv, -1.0f),
-                                         float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x),  MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f),
-                                         float3(uv + float2(-MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x), -MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f),
-                                         float3(uv + float2( MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x), -MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f),
-                                         float3(uv + float2(-MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.x),  MO_UV_MULTISAMPLE_OFFSET / float(pCreateInfo->size.y)), -1.0f)
-                                        };
-                for (float3 singleTexel : multiTexels)
+                if (moIntersectBVH(mesh->bvhUV, MoRay(singleTexel, {0,0,1}), intersectionUV, &uvIntersectAlgorithm))
                 {
-                    if (moIntersectBVH(mesh->bvhUV, MoRay(singleTexel, {0,0,1}), intersectionUV, &uvIntersectAlgorithm))
-                    {
-                        const MoTriangle& triangle = *intersectionUV.pTriangle;
+                    const MoTriangle& triangle = *intersectionUV.pTriangle;
 
-                        float3 surfacePoint, surfaceNormal;
-                        triangle.getSurface(triangle.getUVBarycentric(uv), surfacePoint, surfaceNormal);
+                    float3 surfacePoint, surfaceNormal;
+                    triangle.getSurface(triangle.getUVBarycentric(uv), surfacePoint, surfaceNormal);
 
-                        // ambient
-                        float3 value = moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
-                            surfacePoint, pCreateInfo->ambientLightingPower * 2.f/*top hemisphere*/ * 2.f/*white point*/, 1.f, pCreateInfo->ambientOcclusionDistance,
-                                               1.f, 0.f, 0.f,
-                            localGenerator, true, pCreateInfo->ambientLightingSampleCount);
+                    float3 value = surfaceNormal / 2 + float3(0.5f,0.5f,0.5f);
 
-                        // directional
-                        for (std::uint32_t j = 0; j < pCreateInfo->directionalLightSourceCount; ++j)
-                        {
-                            float relativeSamplingRadius = std::sin(pCreateInfo->pDirectionalLightSources[j].angularSize);
-                            value += moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
-                                surfacePoint + pCreateInfo->pDirectionalLightSources[j].direction, pCreateInfo->pDirectionalLightSources[j].power, relativeSamplingRadius, std::numeric_limits<float>::max(),
-                                              1.f, 0.f, 0.f,
-                                localGenerator, false, pCreateInfo->directionalLightingSampleCount);
-                        }
+                    pTextureSamples[index].x = std::uint8_t(std::min(255.f, value.x * 255.999f));
+                    pTextureSamples[index].y = std::uint8_t(std::min(255.f, value.y * 255.999f));
+                    pTextureSamples[index].z = std::uint8_t(std::min(255.f, value.z * 255.999f));
+                    pTextureSamples[index].w = pCreateInfo->nullColor.w;
 
-                        // point
-                        for (std::uint32_t j = 0; j < pCreateInfo->pointLightSourceCount; ++j)
-                        {
-                            value += moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
-                                pCreateInfo->pPointLightSources[j].position, pCreateInfo->pPointLightSources[j].power, pCreateInfo->pPointLightSources[j].size, length(pCreateInfo->pPointLightSources[j].position - surfacePoint),
-                                              pCreateInfo->pPointLightSources[j].constantAttenuation, pCreateInfo->pPointLightSources[j].linearAttenuation, pCreateInfo->pPointLightSources[j].quadraticAttenuation,
-                                localGenerator, false, pCreateInfo->pointLightingSampleCount);
-                        }
-
-                        pTextureSamples[index].x = std::uint8_t(std::min(255.f, value.x * 255.999f));
-                        pTextureSamples[index].y = std::uint8_t(std::min(255.f, value.y * 255.999f));
-                        pTextureSamples[index].z = std::uint8_t(std::min(255.f, value.z * 255.999f));
-                        pTextureSamples[index].w = pCreateInfo->nullColor.w;
-
-                        break;
-                    }
-                }
-                if (pTextureSamples[index].w == 0)
-                {
-                    pTextureSamples[index] = pCreateInfo->nullColor;
+                    break;
                 }
             }
-
-            if (pLog)
+            if (pTextureSamples[index].w == 0)
             {
-                std::lock_guard<std::mutex> lock(logMutex);
-                ++rowsCompleted;
-                if (rowsCompleted <= 1) *pLog << "\r" << rowsCompleted << " line generated" << std::flush;
-                else *pLog << "\r" << rowsCompleted << " lines generated" << std::flush;
+                pTextureSamples[index] = pCreateInfo->nullColor;
             }
-        }));
-    }
-    for (auto & thread : threads)
-    {
-        thread.join();
-    }
+        }
+
+        if (pLog)
+        {
+            std::lock_guard<std::mutex> lock(logMutex);
+            ++rowsCompleted;
+            if (rowsCompleted <= 1) *pLog << "\r" << rowsCompleted << " line generated" << std::flush;
+            else *pLog << "\r" << rowsCompleted << " lines generated" << std::flush;
+        }
+    }, pCreateInfo->jobs);
 
     if (pLog)
     {
