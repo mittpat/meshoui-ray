@@ -27,12 +27,7 @@ int main(int argc, char** argv)
     std::string filename;
     std::string outputFilenameFmt;
 
-    MoDirectionalLight directionalLightSources[1] = {
-        {normalize(float3(1,1,1)),
-         0.6f,
-         0.009f} // the sun's angular radius
-    };
-
+    MoDirectionalLight directionalLightSources[1] = {};
     MoPointLight pointLightSources[1] = {
         {float3(2,2,2),
          2.f,
@@ -41,9 +36,7 @@ int main(int argc, char** argv)
     };
 
     MoLightmapCreateInfo info = {};
-    info.directionalLightingSampleCount = 1;
     info.pDirectionalLightSources = directionalLightSources;
-    info.directionalLightSourceCount = 1;
     info.pointLightingSampleCount = 32;
     info.pPointLightSources = pointLightSources;
     info.pointLightSourceCount = 0;
@@ -56,9 +49,13 @@ int main(int argc, char** argv)
           .show_positional_help();
         options.add_options()
           ("c,coherent", "Use coherent, despeckled rays", cxxopts::value<bool>())
-          ("D,amb_dist", "Ambient distance clamp", cxxopts::value<float>()->default_value("1.f"))
-          ("P,amb_pow", "Ambient power [0-1]", cxxopts::value<float>()->default_value("1.f"))
-          ("S,amb_samp", "Ambient sample count", cxxopts::value<std::uint32_t>()->default_value("64"))
+          ("amb_dist", "Ambient distance clamp", cxxopts::value<float>()->default_value("1.f"))
+          ("amb_pow", "Ambient power [0-1]", cxxopts::value<float>()->default_value("1.f"))
+          ("amb_samp", "Ambient sample count", cxxopts::value<std::uint32_t>()->default_value("64"))
+          ("dir_dir", "Directional light direction", cxxopts::value<std::vector<float>>()->default_value("0.f,0.f,1.f"))
+          ("dir_rad", "Directional light angular radius", cxxopts::value<float>()->default_value("0.01f"))
+          ("dir_pow", "Directional light power [0-1]", cxxopts::value<float>()->default_value("1.f"))
+          ("dir_samp", "Directional light sample count", cxxopts::value<std::uint32_t>()->default_value("1"))
           ("s,size", "Output size in pixels", cxxopts::value<std::vector<std::uint32_t>>()->default_value("256,256"))
           ("f,file", "Input dae file name", cxxopts::value<std::string>()->default_value("teapot.dae"))
           ("n,null", "Null color as 4-byte rgba", cxxopts::value<std::vector<std::uint8_t>>()->default_value("127,127,127,255"))
@@ -86,6 +83,11 @@ int main(int argc, char** argv)
         info.ambientLightingSampleCount = result["amb_samp"].as<std::uint32_t>();
         info.ambientLightingPower = result["amb_pow"].as<float>();
         info.ambientOcclusionDistance = result["amb_dist"].as<float>();
+        info.directionalLightingSampleCount = result["dir_samp"].as<std::uint32_t>();
+        info.directionalLightSourceCount = 1;
+        info.pDirectionalLightSources[0].direction = normalize(float3(result["dir_dir"].as<std::vector<float>>().data()));
+        info.pDirectionalLightSources[0].power = result["dir_pow"].as<float>();
+        info.pDirectionalLightSources[0].angularSize = result["dir_rad"].as<float>();
     }
     catch (const cxxopts::OptionException& e)
     {

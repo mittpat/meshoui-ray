@@ -587,43 +587,105 @@ float3 moNextSphericalSample(std::mt19937 * generator, bool direction = false)
     return vect;
 }
 
-float3 moGather(MoBVH bvh, MoIntersectBVHAlgorithm* pAlgorithm, const float3& surfacePoint, const float3& surfaceNormal,
-               const float3& lightSource, float lightSourcePower, float lightSourceSize, float lightSourceDistance,
-               float constantAttenuation, float linearAttenuation, float quadraticAttenuation,
-               std::mt19937 * generator, bool directionalGenerator, std::uint32_t sampleCount)
-{
 #define MO_SURFACE_BIAS 0.01f
+float3 moGatherAmbient(MoBVH bvh, MoIntersectBVHAlgorithm* pAlgorithm,
+                       const float3& surfacePoint, const float3& surfaceNormal,
+                       float lightSourcePower, float lightSourceDistance,
+                       std::mt19937* generator, std::uint32_t sampleCount)
+{
+    if (sampleCount == 0)
+    {
+        return {0.f,0.f,0.f};
+    }
 
-    float3 value = {};
+    float value = 0.f;
     for (std::uint32_t i = 0; i < sampleCount; ++i)
     {
-        float3 delta = lightSource - surfacePoint;
-        if (i > 0)
+        float3 rayCast = moNextSphericalSample(generator, true);
+        float diffuseFactor = dot(surfaceNormal, rayCast);
+        if (diffuseFactor > 0.f)
         {
-            delta += moNextSphericalSample(generator, directionalGenerator) * lightSourceSize;
+            MoIntersectResult intersection = {};
+            if (moIntersectBVH(bvh, MoRay(surfacePoint + surfaceNormal * MO_SURFACE_BIAS, rayCast), intersection, pAlgorithm)
+                    && intersection.distance < lightSourceDistance)
+            {
+                // light is occluded
+            }
+            else
+            {
+                value += diffuseFactor * lightSourcePower;
+            }
         }
+    }
+    return float3{value, value, value} / sampleCount;
+}
+
+float3 moGatherLight(MoBVH bvh, MoIntersectBVHAlgorithm* pAlgorithm,
+                     const float3& surfacePoint, const float3& surfaceNormal,
+                     const float3& lightSource, float lightSourcePower, float lightSourceSize, float lightSourceDistance,
+                     float constantAttenuation, float linearAttenuation, float quadraticAttenuation,
+                     std::mt19937 * generator, std::uint32_t sampleCount)
+{
+    if (sampleCount == 0)
+    {
+        return {0.f,0.f,0.f};
+    }
+
+    float3 mainRay = lightSource - surfacePoint;
+
+    if (sampleCount >= 8)
+    {
+        // edge-test for AA
+        bool doMulisampling = false;
+        static const float3 aasamples[7] = {{0,0,0}, {1,0,0}, {0,1,0}, {0,0,1}, {-1,0,0}, {0,-1,0}, {0,0,-1}};
+        for (const float3& sample : aasamples)
+        {
+            float3 rayCast = normalize(mainRay + sample * lightSourceSize * 1.5f);
+            float diffuseFactor = dot(surfaceNormal, rayCast);
+            if (diffuseFactor > 0.f)
+            {
+                MoIntersectResult intersection = {};
+                if (moIntersectBVH(bvh, MoRay(surfacePoint + surfaceNormal * MO_SURFACE_BIAS, rayCast), intersection, pAlgorithm))
+                {
+                    float3 impactPoint, impactNormal;
+                    intersection.pTriangle->getSurface(intersection.barycentric, impactPoint, impactNormal);
+                    float hit = dot(-rayCast, impactNormal);
+                    if (hit > -0.9f && hit < 0.9f)
+                    {
+                        doMulisampling = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!doMulisampling)
+        {
+            sampleCount = 1;
+        }
+    }
+
+    float value = 0.f;
+    for (std::uint32_t i = 0; i < sampleCount; ++i)
+    {
+        float3 delta = mainRay;
+        if (i > 0) delta += moNextSphericalSample(generator, false) * lightSourceSize;
         float3 rayCast = normalize(delta);
         float diffuseFactor = dot(surfaceNormal, rayCast);
         if (diffuseFactor > 0.f)
         {
-            float power = diffuseFactor * lightSourcePower / (constantAttenuation + linearAttenuation * length(delta) + quadraticAttenuation * length2(delta));
             MoIntersectResult intersection = {};
-            if (moIntersectBVH(bvh, MoRay(surfacePoint + surfaceNormal * MO_SURFACE_BIAS, rayCast), intersection, pAlgorithm))
+            if (moIntersectBVH(bvh, MoRay(surfacePoint + surfaceNormal * MO_SURFACE_BIAS, rayCast), intersection, pAlgorithm)
+                    && intersection.distance < lightSourceDistance)
             {
-                if (intersection.distance < lightSourceDistance)
-                {
-                    // light is occluded
-                    power *= 0.f;
-
-                    //float3 impactPoint, impactNormal;
-                    //intersection.pTriangle->getSurface(intersection.barycentric, impactPoint, impactNormal);
-                }
+                // light is occluded
             }
-            power /= sampleCount;
-            value += power;
+            else
+            {
+                value += diffuseFactor * lightSourcePower / (constantAttenuation + linearAttenuation * length(delta) + quadraticAttenuation * length2(delta));
+            }
         }
     }
-    return value;
+    return float3{value, value, value} / sampleCount;
 }
 
 void moParallelFor(std::int32_t from, std::int32_t to, std::function<void(std::int32_t)> f, std::uint32_t jobs = 0)
@@ -700,28 +762,28 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
                     triangle.getSurface(triangle.getUVBarycentric(uv), surfacePoint, surfaceNormal);
 
                     // ambient
-                    float3 value = moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
-                        surfacePoint, pCreateInfo->ambientLightingPower * 2.f/*top hemisphere*/ * 2.f/*white point*/, 1.f, pCreateInfo->ambientOcclusionDistance,
-                                           1.f, 0.f, 0.f,
-                        localGenerator, true, pCreateInfo->ambientLightingSampleCount);
+                    float3 value = moGatherAmbient(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
+                        pCreateInfo->ambientLightingPower * 2.f/*top hemisphere*/ * 2.f/*white point*/, pCreateInfo->ambientOcclusionDistance,
+                        localGenerator, pCreateInfo->ambientLightingSampleCount);
 
                     // directional
                     for (std::uint32_t j = 0; j < pCreateInfo->directionalLightSourceCount; ++j)
                     {
                         float relativeSamplingRadius = std::sin(pCreateInfo->pDirectionalLightSources[j].angularSize);
-                        value += moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
-                            surfacePoint + pCreateInfo->pDirectionalLightSources[j].direction, pCreateInfo->pDirectionalLightSources[j].power, relativeSamplingRadius, std::numeric_limits<float>::max(),
-                                          1.f, 0.f, 0.f,
-                            localGenerator, false, pCreateInfo->directionalLightingSampleCount);
+                        value += moGatherLight(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
+                            surfacePoint + pCreateInfo->pDirectionalLightSources[j].direction, pCreateInfo->pDirectionalLightSources[j].power,
+                            relativeSamplingRadius, std::numeric_limits<float>::max(), 1.f, 0.f, 0.f,
+                            localGenerator, pCreateInfo->directionalLightingSampleCount);
                     }
 
                     // point
                     for (std::uint32_t j = 0; j < pCreateInfo->pointLightSourceCount; ++j)
                     {
-                        value += moGather(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
-                            pCreateInfo->pPointLightSources[j].position, pCreateInfo->pPointLightSources[j].power, pCreateInfo->pPointLightSources[j].size, length(pCreateInfo->pPointLightSources[j].position - surfacePoint),
-                                          pCreateInfo->pPointLightSources[j].constantAttenuation, pCreateInfo->pPointLightSources[j].linearAttenuation, pCreateInfo->pPointLightSources[j].quadraticAttenuation,
-                            localGenerator, false, pCreateInfo->pointLightingSampleCount);
+                        value += moGatherLight(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
+                            pCreateInfo->pPointLightSources[j].position, pCreateInfo->pPointLightSources[j].power,
+                            pCreateInfo->pPointLightSources[j].size, length(pCreateInfo->pPointLightSources[j].position - surfacePoint),
+                            pCreateInfo->pPointLightSources[j].constantAttenuation, pCreateInfo->pPointLightSources[j].linearAttenuation, pCreateInfo->pPointLightSources[j].quadraticAttenuation,
+                            localGenerator, pCreateInfo->pointLightingSampleCount);
                     }
 
                     pTextureSamples[index].x = std::uint8_t(std::min(255.f, value.x * 255.999f));
