@@ -579,7 +579,7 @@ float3 moNextSphericalSample(std::mt19937 * generator, bool direction = false)
     {
         vect = float3(genX(*generator), genY(*generator), genZ(*generator));
     }
-    while (length2(vect) < 1.f);
+    while (length2(vect) > 1.f);
     if (direction)
     {
         vect = normalize(vect);
@@ -763,7 +763,7 @@ void moGenerateLightMap(const MoTriangleList mesh, MoTextureSample* pTextureSamp
 
                     // ambient
                     float3 value = moGatherAmbient(mesh->bvh, &intersectAlgorithm, surfacePoint, surfaceNormal,
-                        pCreateInfo->ambientLightingPower * 2.f/*top hemisphere*/ * 2.f/*white point*/, pCreateInfo->ambientOcclusionDistance,
+                        pCreateInfo->ambientLightingPower * 2.0f/*top hemisphere*/ * 2.0f/*white point*/, pCreateInfo->ambientOcclusionDistance,
                         localGenerator, pCreateInfo->ambientLightingSampleCount);
 
                     // directional
