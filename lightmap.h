@@ -11,9 +11,10 @@ public:
         : origin(o)
         , direction(d)
         , oneOverDirection(1 / direction.x, 1 / direction.y, 1 / direction.z) {}
-    linalg::aliases::float3 origin;
-    linalg::aliases::float3 direction;
-    linalg::aliases::float3 oneOverDirection;
+
+    alignas(16) linalg::aliases::float3 origin;
+    alignas(16) linalg::aliases::float3 direction;
+    alignas(16) linalg::aliases::float3 oneOverDirection;
 };
 
 class MoBBox
@@ -28,16 +29,13 @@ public:
     void expandToInclude(const linalg::aliases::float3& point);
     void expandToInclude(const MoBBox& box);
 
-    linalg::aliases::float3 min;
-    linalg::aliases::float3 max;
-    linalg::aliases::float3 extent;
+    alignas(16) linalg::aliases::float3 min;
+    alignas(16) linalg::aliases::float3 max;
+    alignas(16) linalg::aliases::float3 extent;
 };
 
 struct MoTriangle
 {
-    linalg::aliases::float3 v0, v1, v2;
-    linalg::aliases::float2 uv0, uv1, uv2;
-    linalg::aliases::float3 n0, n1, n2;
     MoBBox getBoundingBox() const
     {
         MoBBox bb(v0);
@@ -62,6 +60,16 @@ struct MoTriangle
     }
     linalg::aliases::float3 getUVBarycentric(const linalg::aliases::float2& uv) const;
     void getSurface(const linalg::aliases::float3& barycentricCoordinates, linalg::aliases::float3& point, linalg::aliases::float3& normal) const;
+
+    alignas(16) linalg::aliases::float3 v0;
+    alignas(16) linalg::aliases::float3 v1;
+    alignas(16) linalg::aliases::float3 v2;
+    alignas( 8) linalg::aliases::float2 uv0;
+    alignas( 8) linalg::aliases::float2 uv1;
+    alignas( 8) linalg::aliases::float2 uv2;
+    alignas(16) linalg::aliases::float3 n0;
+    alignas(16) linalg::aliases::float3 n1;
+    alignas(16) linalg::aliases::float3 n2;
 };
 
 bool moRayTriangleIntersect(const MoRay& ray, const MoTriangle& triangle, float &t, float &u, float &v);
@@ -70,18 +78,18 @@ bool moTexcoordInTriangleUV(linalg::aliases::float2 tex, const MoTriangle& trian
 
 struct MoBVHSplitNode
 {
-    MoBBox boundingBox;
     std::uint32_t start;
     std::uint32_t count;
     std::uint32_t offset;
+    MoBBox        boundingBox;
 };
 
 typedef struct MoBVH_T
 {
-    const MoTriangle*     pObjects;
-    std::uint32_t         objectCount;
-    const MoBVHSplitNode* pSplitNodes;
     std::uint32_t         splitNodeCount;
+    const MoBVHSplitNode* pSplitNodes;
+    std::uint32_t         objectCount;
+    const MoTriangle*     pObjects;
 }* MoBVH;
 
 struct MoCreateBVHAlgorithm
