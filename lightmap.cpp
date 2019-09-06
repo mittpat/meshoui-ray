@@ -262,7 +262,7 @@ bool moTexcoordInTriangleUV(float2 tex, const MoTriangle& triangle)
             (s >= 0 && s + t <= area);
 }
 
-void moCreateBVH(const MoTriangle *pObjects, uint32_t objectCount, MoBVH* pBVH, MoCreateBVHAlgorithm *pAlgorithm)
+void moCreateBVH(MoTriangleList triangleList, MoBVH* pBVH, MoCreateBVHAlgorithm *pAlgorithm)
 {
     enum : std::uint32_t
     {
@@ -271,10 +271,14 @@ void moCreateBVH(const MoTriangle *pObjects, uint32_t objectCount, MoBVH* pBVH, 
         Node_Root         = 0xfffffffc,
     };
 
+    std::uint32_t currentSize = 0;
+
     MoBVH bvh = *pBVH = new MoBVH_T();
     *bvh = {};
-    carray_resize(&bvh->pObjects, &bvh->objectCount, objectCount);
-    carray_copy(pObjects, bvh->pObjects, bvh->objectCount);
+    bvh->triangleList = triangleList;
+    carray_resize(&bvh->pIndices, &currentSize, triangleList->triangleCount);
+    for (std::uint32_t i = 0; i < currentSize; ++i)
+        const_cast<std::uint32_t*>(bvh->pIndices)[i] = i;
     bvh->splitNodeCount = 0;
     std::uint32_t stackPtr = 0;
 
@@ -288,7 +292,7 @@ void moCreateBVH(const MoTriangle *pObjects, uint32_t objectCount, MoBVH* pBVH, 
     std::uint32_t entryCount = 0;
     carray_resize(&entries, &entryCount, 1);
     entries[stackPtr].start = 0;
-    entries[stackPtr].end = bvh->objectCount;
+    entries[stackPtr].end = currentSize;
     entries[stackPtr].parent = Node_Root;
     stackPtr++;
 
@@ -307,12 +311,12 @@ void moCreateBVH(const MoTriangle *pObjects, uint32_t objectCount, MoBVH* pBVH, 
         splitNode.count = count;
         splitNode.offset = Node_Untouched;
 
-        MoBBox boundingBox = pAlgorithm->getBoundingBox(bvh->pObjects[start]);
-        MoBBox boundingBoxCentroids = pAlgorithm->getCentroid(bvh->pObjects[start]);
+        MoBBox boundingBox = pAlgorithm->getBoundingBox(triangleList->pTriangles[bvh->pIndices[start]]);
+        MoBBox boundingBoxCentroids = pAlgorithm->getCentroid(triangleList->pTriangles[bvh->pIndices[start]]);
         for (std::uint32_t i = start + 1; i < end; ++i)
         {
-            boundingBox.expandToInclude(pAlgorithm->getBoundingBox(bvh->pObjects[i]));
-            boundingBoxCentroids.expandToInclude(pAlgorithm->getCentroid(bvh->pObjects[i]));
+            boundingBox.expandToInclude(pAlgorithm->getBoundingBox(triangleList->pTriangles[bvh->pIndices[i]]));
+            boundingBoxCentroids.expandToInclude(pAlgorithm->getCentroid(triangleList->pTriangles[bvh->pIndices[i]]));
         }
         splitNode.boundingBox = boundingBox;
 
@@ -345,9 +349,9 @@ void moCreateBVH(const MoTriangle *pObjects, uint32_t objectCount, MoBVH* pBVH, 
         std::uint32_t mid = start;
         for (std::uint32_t i = start; i < end; ++i)
         {
-            if (pAlgorithm->getCentroid(bvh->pObjects[i])[splitDimension] < splitLength)
+            if (pAlgorithm->getCentroid(triangleList->pTriangles[bvh->pIndices[i]])[splitDimension] < splitLength)
             {
-                MoTriangle* lObjects = const_cast<MoTriangle*>(bvh->pObjects);
+                std::uint32_t* lObjects = const_cast<std::uint32_t*>(bvh->pIndices);
                 std::swap(lObjects[i], lObjects[mid]);
                 ++mid;
             }
@@ -381,7 +385,7 @@ void moCreateBVH(const MoTriangle *pObjects, uint32_t objectCount, MoBVH* pBVH, 
 
 void moDestroyBVH(MoBVH bvh)
 {
-    carray_free(bvh->pObjects, &bvh->objectCount);
+    carray_free(bvh->pIndices, &bvh->triangleList->triangleCount);
     carray_free(bvh->pSplitNodes, &bvh->splitNodeCount);
     delete bvh;
 }
@@ -454,7 +458,7 @@ bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoIntersectResult& intersection
             for (std::uint32_t i = 0; i < node.count; ++i)
             {
                 float u, v;
-                const MoTriangle& triangle = bvh->pObjects[node.start + i];
+                const MoTriangle& triangle = bvh->triangleList->pTriangles[bvh->pIndices[node.start + i]];
                 float currentDistance = pAlgorithm->intersectObj(ray, triangle, u, v);
                 if (currentDistance <= 0.0)
                 {
@@ -553,12 +557,12 @@ void moCreateTriangleList(const aiMesh * ai_mesh, MoTriangleList *pTriangleList)
     // 3d space
     algo.getBoundingBox = [](const MoTriangle& object) -> MoBBox { return object.getBoundingBox(); };
     algo.getCentroid = [](const MoTriangle& object) -> float3 { return object.getCentroid(); };
-    moCreateBVH(triangleList->pTriangles, triangleList->triangleCount, &triangleList->bvh, &algo);
+    moCreateBVH(triangleList, &triangleList->bvh, &algo);
 
     // uv space
     algo.getBoundingBox = [](const MoTriangle& object) -> MoBBox { return object.getUVBoundingBox(); };
     algo.getCentroid = [](const MoTriangle& object) -> float3 { return object.getUVCentroid(); };
-    moCreateBVH(triangleList->pTriangles, triangleList->triangleCount, &triangleList->bvhUV, &algo);
+    moCreateBVH(triangleList, &triangleList->bvhUV, &algo);
 }
 
 void moDestroyTriangleList(MoTriangleList triangleList)

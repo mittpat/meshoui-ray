@@ -84,12 +84,13 @@ struct MoBVHSplitNode
     MoBBox        boundingBox;
 };
 
+typedef struct MoTriangleList_T* MoTriangleList;
 typedef struct MoBVH_T
 {
     std::uint32_t         splitNodeCount;
     const MoBVHSplitNode* pSplitNodes;
-    std::uint32_t         objectCount;
-    const MoTriangle*     pObjects;
+    const std::uint32_t*  pIndices;
+    MoTriangleList        triangleList;
 }* MoBVH;
 
 struct MoCreateBVHAlgorithm
@@ -98,7 +99,7 @@ struct MoCreateBVHAlgorithm
     linalg::aliases::float3 (*getCentroid)(const MoTriangle&);
 };
 
-void moCreateBVH(const MoTriangle* pObjects, uint32_t objectCount, MoBVH* pBVH, MoCreateBVHAlgorithm* pAlgorithm);
+void moCreateBVH(MoTriangleList triangleList, MoBVH* pBVH, MoCreateBVHAlgorithm* pAlgorithm);
 
 void moDestroyBVH(MoBVH bvh);
 
