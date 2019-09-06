@@ -31,7 +31,6 @@ public:
 
     alignas(16) linalg::aliases::float3 min;
     alignas(16) linalg::aliases::float3 max;
-    alignas(16) linalg::aliases::float3 extent;
 };
 
 struct MoTriangle

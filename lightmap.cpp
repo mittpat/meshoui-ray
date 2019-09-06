@@ -97,18 +97,18 @@ MoBBox::MoBBox(const float3& _min, const float3& _max)
     : min(_min)
     , max(_max)
 {
-    extent = max - min;
 }
 
 MoBBox::MoBBox(const float3& point)
     : min(point)
     , max(point)
 {
-    extent = max - min;
 }
 
 std::uint32_t MoBBox::longestSide() const
 {
+    float3 extent = max - min;
+
     std::uint32_t dimension = 0;
     if (extent.y > extent.x)
     {
@@ -133,7 +133,6 @@ void MoBBox::expandToInclude(const float3& point)
     max.x = std::max(max.x, point.x);
     max.y = std::max(max.y, point.y);
     max.z = std::max(max.z, point.z);
-    extent = max - min;
 }
 
 void MoBBox::expandToInclude(const MoBBox& box)
@@ -144,7 +143,6 @@ void MoBBox::expandToInclude(const MoBBox& box)
     max.x = std::max(max.x, box.max.x);
     max.y = std::max(max.y, box.max.y);
     max.z = std::max(max.z, box.max.z);
-    extent = max - min;
 }
 
 // adapted from Tavian Barnes' "Fast, Branchless Ray/Bounding Box Intersections"
