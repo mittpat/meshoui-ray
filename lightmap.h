@@ -87,7 +87,6 @@ typedef struct MoBVH_T
 {
     std::uint32_t         splitNodeCount;
     const MoBVHSplitNode* pSplitNodes;
-    const std::uint32_t*  pIndices;
     MoTriangleList        triangleList;
 }* MoBVH;
 

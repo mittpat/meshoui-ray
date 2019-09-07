@@ -269,14 +269,16 @@ void moCreateBVH(MoTriangleList triangleList, MoBVH* pBVH, MoCreateBVHAlgorithm 
         Node_Root         = 0xfffffffc,
     };
 
-    std::uint32_t currentSize = 0;
-
     MoBVH bvh = *pBVH = new MoBVH_T();
     *bvh = {};
-    bvh->triangleList = triangleList;
-    carray_resize(&bvh->pIndices, &currentSize, triangleList->triangleCount);
+    bvh->triangleList = triangleList;    
+
+    std::uint32_t currentSize = 0;
+    const std::uint32_t* indices = nullptr;
+    carray_resize(&indices, &currentSize, triangleList->triangleCount);
     for (std::uint32_t i = 0; i < currentSize; ++i)
-        const_cast<std::uint32_t*>(bvh->pIndices)[i] = i;
+        const_cast<std::uint32_t*>(indices)[i] = i;
+
     bvh->splitNodeCount = 0;
     std::uint32_t stackPtr = 0;
 
@@ -308,12 +310,12 @@ void moCreateBVH(MoTriangleList triangleList, MoBVH* pBVH, MoCreateBVHAlgorithm 
         splitNode.start = start;
         splitNode.offset = Node_Untouched;
 
-        MoBBox boundingBox = pAlgorithm->getBoundingBox(triangleList->pTriangles[bvh->pIndices[start]]);
-        MoBBox boundingBoxCentroids = pAlgorithm->getCentroid(triangleList->pTriangles[bvh->pIndices[start]]);
+        MoBBox boundingBox = pAlgorithm->getBoundingBox(triangleList->pTriangles[indices[start]]);
+        MoBBox boundingBoxCentroids = pAlgorithm->getCentroid(triangleList->pTriangles[indices[start]]);
         for (std::uint32_t i = start + 1; i < end; ++i)
         {
-            boundingBox.expandToInclude(pAlgorithm->getBoundingBox(triangleList->pTriangles[bvh->pIndices[i]]));
-            boundingBoxCentroids.expandToInclude(pAlgorithm->getCentroid(triangleList->pTriangles[bvh->pIndices[i]]));
+            boundingBox.expandToInclude(pAlgorithm->getBoundingBox(triangleList->pTriangles[indices[i]]));
+            boundingBoxCentroids.expandToInclude(pAlgorithm->getCentroid(triangleList->pTriangles[indices[i]]));
         }
         splitNode.boundingBox = boundingBox;
 
@@ -346,9 +348,9 @@ void moCreateBVH(MoTriangleList triangleList, MoBVH* pBVH, MoCreateBVHAlgorithm 
         std::uint32_t mid = start;
         for (std::uint32_t i = start; i < end; ++i)
         {
-            if (pAlgorithm->getCentroid(triangleList->pTriangles[bvh->pIndices[i]])[splitDimension] < splitLength)
+            if (pAlgorithm->getCentroid(triangleList->pTriangles[indices[i]])[splitDimension] < splitLength)
             {
-                std::uint32_t* lObjects = const_cast<std::uint32_t*>(bvh->pIndices);
+                std::uint32_t* lObjects = const_cast<std::uint32_t*>(indices);
                 std::swap(lObjects[i], lObjects[mid]);
                 ++mid;
             }
@@ -379,16 +381,16 @@ void moCreateBVH(MoTriangleList triangleList, MoBVH* pBVH, MoCreateBVHAlgorithm 
     for (std::uint32_t i = 0; i < splitNodeCount; ++i)
     {
         MoBVHSplitNode& splitNode = const_cast<MoBVHSplitNode&>(bvh->pSplitNodes[i]);
-        splitNode.start = splitNode.offset == 0 ? bvh->pIndices[splitNode.start] : 0;
+        splitNode.start = splitNode.offset == 0 ? indices[splitNode.start] : 0;
     }
 
     carray_resize(&bvh->pSplitNodes, &bvh->splitNodeCount, splitNodeCount);
-    carray_free(entries, &entryCount);
+    carray_free(entries, &entryCount);    
+    carray_free(indices, &currentSize);
 }
 
 void moDestroyBVH(MoBVH bvh)
 {
-    carray_free(bvh->pIndices, &bvh->triangleList->triangleCount);
     carray_free(bvh->pSplitNodes, &bvh->splitNodeCount);
     delete bvh;
 }
@@ -459,7 +461,7 @@ bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoIntersectResult& intersection
         if (node.offset == 0)
         {
             float u, v;
-            const MoTriangle& triangle = bvh->triangleList->pTriangles[bvh->pIndices[node.start]];
+            const MoTriangle& triangle = bvh->triangleList->pTriangles[node.start];
             float currentDistance = pAlgorithm->intersectObj(ray, triangle, u, v);
             if (currentDistance <= 0.0)
             {
