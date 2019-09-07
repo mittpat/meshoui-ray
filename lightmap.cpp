@@ -306,7 +306,6 @@ void moCreateBVH(MoTriangleList triangleList, MoBVH* pBVH, MoCreateBVHAlgorithm 
 
         splitNodeCount++;
         splitNode.start = start;
-        splitNode.count = count;
         splitNode.offset = Node_Untouched;
 
         MoBBox boundingBox = pAlgorithm->getBoundingBox(triangleList->pTriangles[bvh->pIndices[start]]);
@@ -375,6 +374,12 @@ void moCreateBVH(MoTriangleList triangleList, MoBVH* pBVH, MoCreateBVHAlgorithm 
         entries[stackPtr].end = mid;
         entries[stackPtr].parent = splitNodeCount - 1;
         stackPtr++;
+    }
+
+    for (std::uint32_t i = 0; i < splitNodeCount; ++i)
+    {
+        MoBVHSplitNode& splitNode = const_cast<MoBVHSplitNode&>(bvh->pSplitNodes[i]);
+        splitNode.start = splitNode.offset == 0 ? bvh->pIndices[splitNode.start] : 0;
     }
 
     carray_resize(&bvh->pSplitNodes, &bvh->splitNodeCount, splitNodeCount);
@@ -453,22 +458,19 @@ bool moIntersectBVH(MoBVH bvh, const MoRay& ray, MoIntersectResult& intersection
 
         if (node.offset == 0)
         {
-            for (std::uint32_t i = 0; i < node.count; ++i)
+            float u, v;
+            const MoTriangle& triangle = bvh->triangleList->pTriangles[bvh->pIndices[node.start]];
+            float currentDistance = pAlgorithm->intersectObj(ray, triangle, u, v);
+            if (currentDistance <= 0.0)
             {
-                float u, v;
-                const MoTriangle& triangle = bvh->triangleList->pTriangles[bvh->pIndices[node.start + i]];
-                float currentDistance = pAlgorithm->intersectObj(ray, triangle, u, v);
-                if (currentDistance <= 0.0)
-                {
-                    intersection.pTriangle = &triangle;
-                    return true;
-                }
-                if (currentDistance < intersection.distance)
-                {
-                    intersection.pTriangle = &triangle;
-                    intersection.barycentric = {1.f - u - v, u, v};
-                    intersection.distance = currentDistance;
-                }
+                intersection.pTriangle = &triangle;
+                return true;
+            }
+            if (currentDistance < intersection.distance)
+            {
+                intersection.pTriangle = &triangle;
+                intersection.barycentric = {1.f - u - v, u, v};
+                intersection.distance = currentDistance;
             }
         }
         else

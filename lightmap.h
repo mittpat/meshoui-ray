@@ -77,10 +77,9 @@ bool moTexcoordInTriangleUV(linalg::aliases::float2 tex, const MoTriangle& trian
 
 struct MoBVHSplitNode
 {
-    std::uint32_t start;
-    std::uint32_t count;
-    std::uint32_t offset;
     MoBBox        boundingBox;
+    std::uint32_t start;
+    std::uint32_t offset;
 };
 
 typedef struct MoTriangleList_T* MoTriangleList;
